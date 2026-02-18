@@ -1,6 +1,7 @@
 import React, { FormEvent, useState } from "react";
+import { isAxiosError } from "axios";
 import Button from "../components/Button";
-import { createQuestion } from "../services/api";
+import { createAdvice } from "../services/api";
 
 export default function Ask() {
   const [loading, setLoading] = useState(false);
@@ -13,16 +14,31 @@ export default function Ask() {
     setLoading(true);
     setStatus(null);
 
-    await createQuestion({
-      title: String(formData.get("title") || ""),
-      category: String(formData.get("category") || "Career"),
-      question: String(formData.get("question") || ""),
-      anonymous: formData.get("anonymous") === "on",
-    });
+    const title = String(formData.get("title") || "");
+    const category = String(formData.get("category") || "Career");
+    const question = String(formData.get("question") || "");
+    const anonymous = formData.get("anonymous") === "on";
 
-    setLoading(false);
-    setStatus("Question submitted. Backend connection can be added next.");
-    event.currentTarget.reset();
+    try {
+      await createAdvice({
+        title,
+        body: `[Category: ${category}]\n[Anonymous: ${
+          anonymous ? "Yes" : "No"
+        }]\n\n${question}`,
+      });
+      setStatus(
+        "Question submitted for moderation. You can track it in Advice.",
+      );
+      event.currentTarget.reset();
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 401) {
+        setStatus("Please login first to submit your question.");
+      } else {
+        setStatus("Submission failed. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

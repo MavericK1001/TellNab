@@ -1,4 +1,4 @@
-import { AdvicePost, UserProfile } from "../types";
+import { AdvicePost } from "../types";
 
 export const mockFeed: AdvicePost[] = [
   {
@@ -35,12 +35,3 @@ export const mockFeed: AdvicePost[] = [
     createdAt: "1d ago",
   },
 ];
-
-export const mockProfile: UserProfile = {
-  id: "u1",
-  name: "Nabeel",
-  bio: "Building TellNab one honest answer at a time.",
-  asks: 12,
-  replies: 48,
-  helpfulVotes: 311,
-};

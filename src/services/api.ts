@@ -1,5 +1,5 @@
 import axios from "axios";
-import { mockFeed, mockProfile } from "../data/mockData";
+import { mockFeed } from "../data/mockData";
 import {
   AdminUser,
   AdviceComment,
@@ -9,6 +9,7 @@ import {
   AuthResponse,
   AuthUser,
   ConversationSummary,
+  HomeOverview,
   PrivateMessage,
   UserProfile,
   UserRole,
@@ -136,11 +137,28 @@ export async function getFeed(): Promise<AdvicePost[]> {
 
 export async function getProfile(): Promise<UserProfile> {
   try {
-    const response = await api.get<UserProfile>("/profile");
-    return response.data;
+    const response = await api.get<{ profile: UserProfile }>("/profile");
+    return response.data.profile;
   } catch {
-    return mockProfile;
+    const user = await fetchCurrentUser();
+    return {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      bio: "Complete your first thread to build your TellNab profile impact.",
+      memberSince: user.createdAt || new Date().toISOString(),
+      asks: 0,
+      replies: 0,
+      featuredThreads: 0,
+      approvedThreads: 0,
+      pendingThreads: 0,
+    };
   }
+}
+
+export async function getHomeOverview(): Promise<HomeOverview> {
+  const response = await api.get<HomeOverview>("/home/overview");
+  return response.data;
 }
 
 export async function createQuestion(payload: {

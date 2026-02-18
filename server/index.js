@@ -311,6 +311,74 @@ app.get("/api/auth/me", authRequired, (req, res) => {
   return res.json({ user: sanitizeUser(req.user) });
 });
 
+app.get("/api/profile", authRequired, async (req, res) => {
+  try {
+    const [asks, replies, featuredThreads, approvedThreads, pendingThreads] = await Promise.all([
+      prisma.advice.count({ where: { authorId: req.user.id } }),
+      prisma.adviceComment.count({ where: { authorId: req.user.id } }),
+      prisma.advice.count({ where: { authorId: req.user.id, isFeatured: true } }),
+      prisma.advice.count({ where: { authorId: req.user.id, status: ADVICE_STATUS.APPROVED } }),
+      prisma.advice.count({ where: { authorId: req.user.id, status: ADVICE_STATUS.PENDING } }),
+    ]);
+
+    const roleLabel =
+      req.user.role === ROLES.ADMIN
+        ? "Admin"
+        : req.user.role === ROLES.MODERATOR
+          ? "Moderator"
+          : "Member";
+
+    return res.json({
+      profile: {
+        id: req.user.id,
+        name: req.user.name,
+        role: req.user.role,
+        bio: `${roleLabel} at TellNab • helping people make clear decisions with direct advice.`,
+        memberSince: req.user.createdAt,
+        asks,
+        replies,
+        featuredThreads,
+        approvedThreads,
+        pendingThreads,
+      },
+    });
+  } catch {
+    return res.status(500).json({ message: "Failed to load profile" });
+  }
+});
+
+app.get("/api/home/overview", async (_req, res) => {
+  try {
+    const [approvedThreads, featuredThreads, totalComments, activeMembers, pendingReview, highlights] =
+      await Promise.all([
+        prisma.advice.count({ where: { status: ADVICE_STATUS.APPROVED } }),
+        prisma.advice.count({ where: { status: ADVICE_STATUS.APPROVED, isFeatured: true } }),
+        prisma.adviceComment.count(),
+        prisma.user.count({ where: { isActive: true } }),
+        prisma.advice.count({ where: { status: ADVICE_STATUS.PENDING } }),
+        prisma.advice.findMany({
+          where: { status: ADVICE_STATUS.APPROVED },
+          orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
+          take: 3,
+          include: { author: true },
+        }),
+      ]);
+
+    return res.json({
+      metrics: {
+        approvedThreads,
+        featuredThreads,
+        totalComments,
+        activeMembers,
+        pendingReview,
+      },
+      highlights: highlights.map(sanitizeAdvice),
+    });
+  } catch {
+    return res.status(500).json({ message: "Failed to load homepage overview" });
+  }
+});
+
 app.get("/api/admin/users", authRequired, adminRequired, async (_req, res) => {
   const users = await prisma.user.findMany({ orderBy: { createdAt: "desc" } });
   return res.json({ users: users.map(sanitizeUser) });

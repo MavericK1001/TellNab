@@ -61,3 +61,56 @@ body::before {
   background: rgb(124 58 237 / 0.35);
   color: #ffffff;
 }
+
+.reveal-block {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 540ms ease, transform 540ms ease;
+}
+
+.reveal-block.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes tellnab-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes tellnab-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(124 58 237 / 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgb(124 58 237 / 0);
+  }
+}
+
+.home-float-soft {
+  animation: tellnab-float 5.5s ease-in-out infinite;
+}
+
+.home-pulse-glow {
+  animation: tellnab-glow 2.4s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-block,
+  .reveal-block.is-visible {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .home-float-soft,
+  .home-pulse-glow {
+    animation: none;
+  }
+}

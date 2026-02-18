@@ -20,10 +20,25 @@ export type AdvicePost = {
 export type UserProfile = {
   id: string;
   name: string;
+  role: UserRole;
   bio: string;
+  memberSince: string;
   asks: number;
   replies: number;
-  helpfulVotes: number;
+  featuredThreads: number;
+  approvedThreads: number;
+  pendingThreads: number;
+};
+
+export type HomeOverview = {
+  metrics: {
+    approvedThreads: number;
+    featuredThreads: number;
+    totalComments: number;
+    activeMembers: number;
+    pendingReview: number;
+  };
+  highlights: AdviceItem[];
 };
 
 export type UserRole = "MEMBER" | "MODERATOR" | "ADMIN";
