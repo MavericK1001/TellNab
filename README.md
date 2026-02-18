@@ -95,3 +95,22 @@ npm run prisma:seed
 - Replace seed admin credentials in `.env` immediately
 - Keep `CORS_ORIGIN` restricted to trusted frontend origins
 - In production, serve over HTTPS and keep cookies `secure`
+
+## Render deployment (PostgreSQL)
+
+- This repo keeps local SQLite schema in [prisma/schema.prisma](prisma/schema.prisma)
+- Use PostgreSQL schema for live deploy: [prisma/schema.live.prisma](prisma/schema.live.prisma)
+
+Recommended Render commands:
+
+- Build command:
+
+```bash
+npm install && npm run prisma:generate:live && npm run prisma:dbpush:live && npm run prisma:seed
+```
+
+- Start command:
+
+```bash
+npm run start:live
+```

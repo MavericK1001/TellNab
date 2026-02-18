@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("MEMBER")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  advices              Advice[]                  @relation("AdviceAuthor")
+  comments             AdviceComment[]
+  moderatedAdvices     Advice[]                  @relation("AdviceModerator")
+  moderationActions    AdviceModerationAction[]
+  createdConversations Conversation[]            @relation("ConversationCreator")
+  conversationLinks    ConversationParticipant[]
+  sentMessages         Message[]
+}
+
+model Advice {
+  id          String   @id @default(cuid())
+  title       String
+  body        String
+  status      String   @default("PENDING")
+  isLocked    Boolean  @default(false)
+  isFeatured  Boolean  @default(false)
+  holdReason  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  moderatedAt DateTime?
+
+  authorId String
+  author   User @relation("AdviceAuthor", fields: [authorId], references: [id])
+
+  moderatedById String?
+  moderatedBy   User? @relation("AdviceModerator", fields: [moderatedById], references: [id])
+
+  comments AdviceComment[]
+  actions  AdviceModerationAction[]
+}
+
+model AdviceComment {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id])
+
+  authorId String
+  author   User @relation(fields: [authorId], references: [id])
+
+  parentId String?
+  parent   AdviceComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies  AdviceComment[] @relation("CommentReplies")
+}
+
+model AdviceModerationAction {
+  id        String   @id @default(cuid())
+  action    String
+  note      String?
+  createdAt DateTime @default(now())
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id])
+
+  moderatorId String
+  moderator   User @relation(fields: [moderatorId], references: [id])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdById String
+  createdBy   User @relation("ConversationCreator", fields: [createdById], references: [id])
+
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id       String   @id @default(cuid())
+  joinedAt DateTime @default(now())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  senderId String
+  sender   User @relation(fields: [senderId], references: [id])
+}

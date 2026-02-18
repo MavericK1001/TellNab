@@ -17,8 +17,10 @@
     "test": "vitest",
     "test:run": "vitest run",
     "prisma:generate": "prisma generate",
+    "prisma:generate:live": "prisma generate --schema prisma/schema.live.prisma",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:dbpush:live": "prisma db push --schema prisma/schema.live.prisma",
     "prisma:seed": "node prisma/seed.js"
   },
   "dependencies": {
