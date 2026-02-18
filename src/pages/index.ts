@@ -1,0 +1,12 @@
+export { default as Home } from "./Home";
+export { default as Ask } from "./Ask";
+export { default as Feed } from "./Feed";
+export { default as Profile } from "./Profile";
+export { default as Login } from "./Login";
+export { default as Register } from "./Register";
+export { default as Admin } from "./Admin";
+export { default as AdviceCenter } from "./AdviceCenter";
+export { default as AdviceDetail } from "./AdviceDetail";
+export { default as About } from "./About";
+export { default as MessagingCenter } from "./MessagingCenter";
+export { default as Terms } from "./Terms";

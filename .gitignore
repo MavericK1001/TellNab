@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.live
+config/local/server.env
+config/live/server.env
+.vscode/
+coverage/
