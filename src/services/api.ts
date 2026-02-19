@@ -547,6 +547,20 @@ export async function updateAdviceFlags(
   return response.data.advice;
 }
 
+export async function deleteAdviceCommentAsModerator(
+  adviceId: string,
+  commentId: string,
+  reason?: string,
+): Promise<{ success: boolean; removedCount: number }> {
+  const response = await api.delete<{ success: boolean; removedCount: number }>(
+    `/moderation/advice/${adviceId}/comments/${commentId}`,
+    {
+      data: reason ? { reason } : {},
+    },
+  );
+  return response.data;
+}
+
 export async function getConversations(): Promise<ConversationSummary[]> {
   const response = await api.get<{ conversations: ConversationSummary[] }>("/messages/conversations");
   return response.data.conversations;

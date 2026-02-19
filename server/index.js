@@ -642,6 +642,10 @@ const commentSchema = z.object({
   parentId: z.string().optional(),
 });
 
+const moderateCommentDeleteSchema = z.object({
+  reason: z.string().min(3).max(240).optional(),
+});
+
 const createConversationSchema = z.object({
   recipientId: z.string().min(1),
 });
@@ -2045,6 +2049,8 @@ app.post("/api/advice/:id/boost/checkout", authRequired, async (req, res) => {
 app.get("/api/advice/:id", async (req, res) => {
   await clearExpiredBoosts();
 
+  const viewer = await getOptionalAuthUser(req);
+
   const advice = await prisma.advice.findUnique({
     where: { id: req.params.id },
     include: {
@@ -2062,33 +2068,27 @@ app.get("/api/advice/:id", async (req, res) => {
     return res.status(404).json({ message: "Advice not found" });
   }
 
-  if (advice.status !== ADVICE_STATUS.APPROVED) {
+  const canAccessUnpublished = Boolean(
+    viewer && (viewer.id === advice.authorId || viewer.role === ROLES.ADMIN || viewer.role === ROLES.MODERATOR),
+  );
+
+  if (advice.status !== ADVICE_STATUS.APPROVED && !canAccessUnpublished) {
     return res.status(403).json({ message: "Advice not publicly available" });
   }
 
   const followCount = await prisma.adviceFollow.count({ where: { adviceId: advice.id } });
 
   let followedByCurrentUser = false;
-  if (req.headers.authorization || req.cookies.tn_auth) {
-    try {
-      const header = req.headers.authorization;
-      const bearer = header && header.startsWith("Bearer ") ? header.slice(7) : null;
-      const token = bearer || req.cookies.tn_auth;
-      if (token) {
-        const payload = jwt.verify(token, JWT_SECRET);
-        const follow = await prisma.adviceFollow.findUnique({
-          where: {
-            adviceId_userId: {
-              adviceId: advice.id,
-              userId: payload.sub,
-            },
-          },
-        });
-        followedByCurrentUser = Boolean(follow);
-      }
-    } catch {
-      followedByCurrentUser = false;
-    }
+  if (viewer) {
+    const follow = await prisma.adviceFollow.findUnique({
+      where: {
+        adviceId_userId: {
+          adviceId: advice.id,
+          userId: viewer.id,
+        },
+      },
+    });
+    followedByCurrentUser = Boolean(follow);
   }
 
   return res.json({
@@ -2282,6 +2282,99 @@ app.patch("/api/moderation/advice/:id/flags", authRequired, moderatorOrAdminRequ
     return res.status(404).json({ message: "Advice not found" });
   }
 });
+
+app.delete(
+  "/api/moderation/advice/:adviceId/comments/:commentId",
+  authRequired,
+  moderatorOrAdminRequired,
+  async (req, res) => {
+    try {
+      const payload = moderateCommentDeleteSchema.parse(req.body || {});
+
+      const advice = await prisma.advice.findUnique({ where: { id: req.params.adviceId } });
+      if (!advice) {
+        return res.status(404).json({ message: "Advice not found" });
+      }
+
+      const rootComment = await prisma.adviceComment.findUnique({
+        where: { id: req.params.commentId },
+        include: {
+          author: {
+            select: { id: true, name: true, role: true },
+          },
+        },
+      });
+
+      if (!rootComment || rootComment.adviceId !== advice.id) {
+        return res.status(404).json({ message: "Comment not found" });
+      }
+
+      const idsToDelete = [rootComment.id];
+      let cursor = [rootComment.id];
+
+      while (cursor.length > 0) {
+        const children = await prisma.adviceComment.findMany({
+          where: {
+            parentId: { in: cursor },
+            adviceId: advice.id,
+          },
+          select: { id: true },
+        });
+
+        if (children.length === 0) {
+          break;
+        }
+
+        const next = children.map((item) => item.id);
+        idsToDelete.push(...next);
+        cursor = next;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.notification.deleteMany({
+          where: {
+            commentId: { in: idsToDelete },
+          },
+        });
+
+        await tx.adviceComment.deleteMany({
+          where: {
+            id: { in: idsToDelete },
+          },
+        });
+
+        await tx.adviceModerationAction.create({
+          data: {
+            adviceId: advice.id,
+            moderatorId: req.user.id,
+            action: "COMMENT_REMOVED",
+            note: payload.reason || `Deleted comment ${rootComment.id} and ${idsToDelete.length - 1} replies`,
+          },
+        });
+      });
+
+      if (rootComment.authorId !== req.user.id) {
+        await createNotification({
+          userId: rootComment.authorId,
+          type: NOTIFICATION_TYPES.MODERATION,
+          title: "Comment removed by moderation",
+          body: payload.reason || "Your comment was removed by a moderator.",
+          adviceId: advice.id,
+        });
+      }
+
+      return res.json({
+        success: true,
+        removedCount: idsToDelete.length,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      }
+      return res.status(500).json({ message: "Failed to remove comment" });
+    }
+  },
+);
 
 app.get("/api/groups", async (req, res) => {
   try {

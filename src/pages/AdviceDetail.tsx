@@ -5,11 +5,14 @@ import Button from "../components/Button";
 import {
   addAdviceComment,
   createAdviceBoostCheckout,
+  deleteAdviceCommentAsModerator,
   followAdviceThread,
   getAdviceDetail,
+  moderateAdvice,
   unfollowAdviceThread,
+  updateAdviceFlags,
 } from "../services/api";
-import { AdviceComment, AdviceItem } from "../types";
+import { AdviceComment, AdviceItem, AdviceStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { useSeo } from "../utils/seo";
 
@@ -23,7 +26,14 @@ export default function AdviceDetail() {
   const [followPending, setFollowPending] = useState(false);
   const [boostPending, setBoostPending] = useState(false);
   const [boostMessage, setBoostMessage] = useState<string | null>(null);
+  const [moderationPending, setModerationPending] = useState(false);
+  const [moderationMessage, setModerationMessage] = useState<string | null>(
+    null,
+  );
   const boostPriceUsd = Number(import.meta.env.VITE_BOOST_PRICE_USD || 4.99);
+  const isModeratorOrAdmin =
+    user?.role === "ADMIN" || user?.role === "MODERATOR";
+
   const boostDurationDays = Number(
     import.meta.env.VITE_BOOST_DURATION_DAYS || 3,
   );
@@ -128,6 +138,66 @@ export default function AdviceDetail() {
     }
   }
 
+  async function onModerationAction(action: Exclude<AdviceStatus, "PENDING">) {
+    if (!id || !isModeratorOrAdmin) return;
+
+    try {
+      setModerationPending(true);
+      setModerationMessage(null);
+      const note =
+        action === "HOLD"
+          ? window.prompt("Optional hold reason:", "Needs more context") ||
+            undefined
+          : undefined;
+      await moderateAdvice(id, { action, note });
+      setModerationMessage(`Thread moved to ${action}.`);
+      await load();
+    } catch {
+      setModerationMessage("Failed to update thread status.");
+    } finally {
+      setModerationPending(false);
+    }
+  }
+
+  async function onToggleFlag(key: "isLocked" | "isFeatured") {
+    if (!id || !advice || !isModeratorOrAdmin) return;
+
+    try {
+      setModerationPending(true);
+      setModerationMessage(null);
+      await updateAdviceFlags(id, { [key]: !advice[key] });
+      setModerationMessage(
+        `${key === "isLocked" ? "Lock" : "Feature"} flag updated.`,
+      );
+      await load();
+    } catch {
+      setModerationMessage("Failed to update thread flags.");
+    } finally {
+      setModerationPending(false);
+    }
+  }
+
+  async function onDeleteComment(commentId: string) {
+    if (!id || !isModeratorOrAdmin) return;
+
+    const confirmed = window.confirm(
+      "Delete this comment? Any replies under it will also be removed.",
+    );
+    if (!confirmed) return;
+
+    try {
+      setModerationPending(true);
+      setModerationMessage(null);
+      await deleteAdviceCommentAsModerator(id, commentId);
+      setModerationMessage("Comment removed.");
+      await load();
+    } catch {
+      setModerationMessage("Failed to remove comment.");
+    } finally {
+      setModerationPending(false);
+    }
+  }
+
   function renderComments(parentId: string | null, depth = 0): React.ReactNode {
     const children = comments.filter(
       (comment) => (comment.parentId || null) === parentId,
@@ -145,13 +215,25 @@ export default function AdviceDetail() {
         <div className="mt-1 flex items-center justify-between gap-2">
           <p className="text-xs text-slate-400">{comment.author.name}</p>
           {user ? (
-            <button
-              type="button"
-              onClick={() => setReplyTo(comment)}
-              className="text-xs font-semibold text-violet-300 transition hover:text-violet-200"
-            >
-              Reply
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setReplyTo(comment)}
+                className="text-xs font-semibold text-violet-300 transition hover:text-violet-200"
+              >
+                Reply
+              </button>
+              {isModeratorOrAdmin ? (
+                <button
+                  type="button"
+                  disabled={moderationPending}
+                  onClick={() => void onDeleteComment(comment.id)}
+                  className="text-xs font-semibold text-rose-300 transition hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  Delete
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
         {renderComments(comment.id, depth + 1)}
@@ -244,6 +326,57 @@ export default function AdviceDetail() {
           </div>
         ) : null}
       </Card>
+
+      {isModeratorOrAdmin ? (
+        <Card>
+          <h2 className="text-lg font-semibold text-white">
+            Thread management
+          </h2>
+          <p className="mt-1 text-sm text-slate-300">
+            Moderator controls for status and visibility flags.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              disabled={moderationPending}
+              onClick={() => void onModerationAction("APPROVED")}
+            >
+              Approve
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={moderationPending}
+              onClick={() => void onModerationAction("HOLD")}
+            >
+              Hold
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={moderationPending}
+              onClick={() => void onModerationAction("REMOVED")}
+            >
+              Remove
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={moderationPending}
+              onClick={() => void onToggleFlag("isLocked")}
+            >
+              {advice.isLocked ? "Unlock" : "Lock"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={moderationPending}
+              onClick={() => void onToggleFlag("isFeatured")}
+            >
+              {advice.isFeatured ? "Unfeature" : "Feature"}
+            </Button>
+          </div>
+          {moderationMessage ? (
+            <p className="mt-2 text-xs text-slate-300">{moderationMessage}</p>
+          ) : null}
+        </Card>
+      ) : null}
 
       <Card>
         <h2 className="text-lg font-semibold text-white">Comments</h2>
