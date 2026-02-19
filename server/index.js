@@ -96,6 +96,7 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || "";
 const CORS_ORIGINS = process.env.CORS_ORIGINS || "";
 const TOKEN_EXPIRY = process.env.TOKEN_EXPIRY || "12h";
 const LOCAL_ORIGIN_PATTERN = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
+const TELLNAB_ORIGIN_PATTERN = /^https:\/\/([a-z0-9-]+\.)?tellnab\.com$/i;
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
 const AUTH_RATE_LIMIT_MAX = Number(
   process.env.AUTH_RATE_LIMIT_MAX || (process.env.NODE_ENV === "production" ? 20 : 200),
@@ -188,6 +189,7 @@ app.use(
 
       if (
         (normalizedOrigin && allowedOrigins.has(normalizedOrigin)) ||
+        (normalizedOrigin && TELLNAB_ORIGIN_PATTERN.test(normalizedOrigin)) ||
         LOCAL_ORIGIN_PATTERN.test(origin)
       ) {
         callback(null, true);
