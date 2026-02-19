@@ -96,6 +96,19 @@ npm run prisma:seed
 - Keep `CORS_ORIGIN` restricted to trusted frontend origins
 - In production, serve over HTTPS and keep cookies `secure`
 
+## Google OAuth setup (required for Google sign-in)
+
+- Frontend build env must include `VITE_GOOGLE_CLIENT_ID`
+- Backend runtime env must include:
+  - `GOOGLE_CLIENT_ID`
+  - `GOOGLE_CLIENT_SECRET`
+- `VITE_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_ID` must be the exact same value.
+- The Google OAuth app must be **Web application** type.
+- Add authorized JavaScript origins in Google Cloud:
+  - `https://tellnab.com`
+  - `https://www.tellnab.com` (if used)
+  - `http://localhost:5173` (local)
+
 ## Render deployment (PostgreSQL)
 
 - This repo keeps local SQLite schema in [prisma/schema.prisma](prisma/schema.prisma)
