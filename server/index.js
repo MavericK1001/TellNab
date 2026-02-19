@@ -2500,37 +2500,97 @@ app.post("/api/support/tickets/:id/replies", supportReplyLimiter, async (req, re
       return res.status(400).json({ message: "Closed tickets cannot receive new replies" });
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      await tx.supportTicketMessage.create({
-        data: {
-          ticketId: existing.id,
-          senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
-          senderName: existing.requesterName,
-          senderEmail: requesterEmail,
-          body: data.message.trim(),
-        },
-      });
+    let updated = null;
 
-      return tx.supportTicket.update({
-        where: { id: existing.id },
-        data: {
-          status:
-            existing.status === SUPPORT_TICKET_STATUS.RESOLVED
-              ? SUPPORT_TICKET_STATUS.IN_PROGRESS
-              : existing.status,
-          resolvedAt: null,
-          resolvedById: null,
-        },
-        include: {
-          resolvedBy: {
-            select: { id: true, name: true, role: true },
+    try {
+      updated = await prisma.$transaction(async (tx) => {
+        await tx.supportTicketMessage.create({
+          data: {
+            ticketId: existing.id,
+            senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+            senderName: existing.requesterName,
+            senderEmail: requesterEmail,
+            body: data.message.trim(),
           },
-          assignedTo: {
-            select: { id: true, name: true, role: true, email: true },
+        });
+
+        return tx.supportTicket.update({
+          where: { id: existing.id },
+          data: {
+            status:
+              existing.status === SUPPORT_TICKET_STATUS.RESOLVED
+                ? SUPPORT_TICKET_STATUS.IN_PROGRESS
+                : existing.status,
+            resolvedAt: null,
+            resolvedById: null,
           },
-        },
+          include: {
+            resolvedBy: {
+              select: { id: true, name: true, role: true },
+            },
+            assignedTo: {
+              select: { id: true, name: true, role: true, email: true },
+            },
+          },
+        });
       });
-    });
+    } catch (primaryError) {
+      console.error("[support] member reply primary flow failed", primaryError);
+    }
+
+    if (!updated) {
+      const canUseMessageModel = Boolean(
+        prisma.supportTicketMessage && typeof prisma.supportTicketMessage.create === "function",
+      );
+
+      try {
+        if (canUseMessageModel) {
+          await prisma.supportTicketMessage.create({
+            data: {
+              ticketId: existing.id,
+              senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+              senderName: existing.requesterName,
+              senderEmail: requesterEmail,
+              body: data.message.trim(),
+            },
+          });
+        }
+      } catch (messageError) {
+        console.error("[support] member reply message fallback failed", messageError);
+      }
+
+      const nextStatus =
+        existing.status === SUPPORT_TICKET_STATUS.RESOLVED
+          ? SUPPORT_TICKET_STATUS.IN_PROGRESS
+          : existing.status;
+
+      try {
+        updated = await prisma.supportTicket.update({
+          where: { id: existing.id },
+          data: {
+            status: nextStatus,
+          },
+        });
+      } catch (updateError) {
+        console.error("[support] member reply ticket fallback update failed", updateError);
+      }
+
+      if (!canUseMessageModel || !updated) {
+        try {
+          const transcriptLine = buildSupportTranscriptLine("Member", data.message);
+          updated = await prisma.supportTicket.update({
+            where: { id: existing.id },
+            data: {
+              status: nextStatus,
+              message: `${String(existing.message || "").trim()}\n\n${transcriptLine}`.trim(),
+            },
+          });
+        } catch (legacyError) {
+          console.error("[support] member reply legacy transcript fallback failed", legacyError);
+          return res.status(500).json({ message: "Failed to send ticket reply" });
+        }
+      }
+    }
 
     return res.status(201).json({
       ticket: serializeSupportTicket(updated),
@@ -2540,6 +2600,7 @@ app.post("/api/support/tickets/:id/replies", supportReplyLimiter, async (req, re
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
+    console.error("[support] member reply failed", error);
     return res.status(500).json({ message: "Failed to send ticket reply" });
   }
 });
