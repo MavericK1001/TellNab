@@ -2189,41 +2189,77 @@ app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdmi
     const nextStatus = data.status || SUPPORT_TICKET_STATUS.IN_PROGRESS;
     const shouldMarkResolved =
       nextStatus === SUPPORT_TICKET_STATUS.RESOLVED || nextStatus === SUPPORT_TICKET_STATUS.CLOSED;
+    let updated = null;
 
-    const updated = await prisma.$transaction(async (tx) => {
-      await tx.supportTicketMessage.create({
-        data: {
-          ticketId: existing.id,
-          senderType: SUPPORT_MESSAGE_SENDER.AGENT,
-          senderName: req.user.name,
-          senderEmail: req.user.email,
-          senderUserId: req.user.id,
-          body: data.message.trim(),
-        },
-      });
+    try {
+      updated = await prisma.$transaction(async (tx) => {
+        await tx.supportTicketMessage.create({
+          data: {
+            ticketId: existing.id,
+            senderType: SUPPORT_MESSAGE_SENDER.AGENT,
+            senderName: req.user.name,
+            senderEmail: req.user.email,
+            senderUserId: req.user.id,
+            body: data.message.trim(),
+          },
+        });
 
-      return tx.supportTicket.update({
-        where: { id: existing.id },
-        data: {
-          status: nextStatus,
-          firstResponseAt: existing.firstResponseAt || new Date(),
-          ...(data.resolutionSummary !== undefined
-            ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
-            : {}),
-          ...(shouldMarkResolved
-            ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
-            : { resolvedAt: null, resolvedById: null }),
-        },
-        include: {
-          resolvedBy: {
-            select: { id: true, name: true, role: true },
+        return tx.supportTicket.update({
+          where: { id: existing.id },
+          data: {
+            status: nextStatus,
+            firstResponseAt: existing.firstResponseAt || new Date(),
+            ...(data.resolutionSummary !== undefined
+              ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
+              : {}),
+            ...(shouldMarkResolved
+              ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
+              : { resolvedAt: null, resolvedById: null }),
           },
-          assignedTo: {
-            select: { id: true, name: true, role: true, email: true },
+          include: {
+            resolvedBy: {
+              select: { id: true, name: true, role: true },
+            },
+            assignedTo: {
+              select: { id: true, name: true, role: true, email: true },
+            },
           },
-        },
+        });
       });
-    });
+    } catch (primaryError) {
+      console.error("[support] agent reply primary flow failed", primaryError);
+    }
+
+    if (!updated) {
+      // Fallback path for partially migrated environments.
+      try {
+        await prisma.supportTicketMessage.create({
+          data: {
+            ticketId: existing.id,
+            senderType: SUPPORT_MESSAGE_SENDER.AGENT,
+            senderName: req.user.name,
+            senderEmail: req.user.email,
+            body: data.message.trim(),
+          },
+        });
+      } catch (messageError) {
+        console.error("[support] agent reply message fallback failed", messageError);
+      }
+
+      const fallbackUpdateData = {
+        status: nextStatus,
+      };
+
+      try {
+        updated = await prisma.supportTicket.update({
+          where: { id: existing.id },
+          data: fallbackUpdateData,
+        });
+      } catch (updateError) {
+        console.error("[support] agent reply ticket fallback update failed", updateError);
+        return res.status(500).json({ message: "Failed to send support reply" });
+      }
+    }
 
     const responseLink = `${SUPPORT_PORTAL_URL.replace(/\/$/, "")}/?view=member&ticketId=${encodeURIComponent(
       existing.id,
@@ -2257,6 +2293,7 @@ app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdmi
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
+    console.error("[support] agent reply failed", error);
     return res.status(500).json({ message: "Failed to send support reply" });
   }
 });
