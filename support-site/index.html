@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TellNab Support</title>
+    <meta
+      name="description"
+      content="Contact TellNab support for inquiries, bugs, and product suggestions."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <p class="eyebrow">support.tellnab.com</p>
+        <h1>TellNab Support Center</h1>
+        <p class="subtitle">
+          Submit inquiries, report issues, or share suggestions. Our team tracks every request.
+        </p>
+      </header>
+
+      <section class="panel">
+        <h2>Contact support</h2>
+        <form id="support-form" novalidate>
+          <div class="grid two">
+            <label>
+              Full name
+              <input name="requesterName" type="text" minlength="2" maxlength="80" required />
+            </label>
+            <label>
+              Email
+              <input name="requesterEmail" type="email" maxlength="150" required />
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
+              Request type
+              <select name="type" required>
+                <option value="INQUIRY">General inquiry</option>
+                <option value="ISSUE">Issue / bug</option>
+                <option value="SUGGESTION">Feature suggestion</option>
+              </select>
+            </label>
+            <label>
+              Affected page URL (optional)
+              <input name="pageUrl" type="url" maxlength="1000" placeholder="https://tellnab.com/..." />
+            </label>
+          </div>
+
+          <label>
+            Subject
+            <input name="subject" type="text" minlength="5" maxlength="180" required />
+          </label>
+
+          <label>
+            Message
+            <textarea name="message" rows="7" minlength="20" maxlength="5000" required></textarea>
+          </label>
+
+          <div class="actions">
+            <button type="submit" id="submit-btn">Send to support</button>
+            <p id="form-status" aria-live="polite"></p>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Suggestions we can implement</h2>
+        <ul class="suggestions">
+          <li><strong>Public status page</strong> for outages, incidents, and maintenance windows.</li>
+          <li><strong>Help center articles</strong> with screenshots for common account and posting issues.</li>
+          <li><strong>Ticket SLA labels</strong> (urgent, normal, low) with expected response times.</li>
+          <li><strong>In-app “Report issue” button</strong> that auto-fills current page URL.</li>
+          <li><strong>Admin support inbox</strong> in your admin panel with resolve/close workflow.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

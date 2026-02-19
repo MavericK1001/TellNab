@@ -80,6 +80,7 @@ npm run dev:server:local
 npm run start:live
 npm run dev:frontend:local
 npm run build:frontend:live
+npm run build:support
 npm run build
 npm run preview
 npm run test:run
@@ -88,6 +89,21 @@ npm run prisma:generate
 npm run prisma:migrate
 npm run prisma:seed
 ```
+
+## Support subdomain
+
+- Static support portal is in [support-site](support-site)
+- Deploy it to `support.tellnab.com`
+- Build-ready copy command:
+
+```bash
+npm run build:support
+```
+
+- Backend API for support requests:
+  - `POST /api/support/tickets` (public)
+  - `GET /api/admin/support/tickets` (moderator/admin)
+  - `PATCH /api/admin/support/tickets/:id` (moderator/admin)
 
 ## Security notes
 

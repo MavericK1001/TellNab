@@ -48,6 +48,32 @@ model User {
   groupJoinRequests  GroupJoinRequest[] @relation("GroupJoinRequester")
   reviewedJoinRequests GroupJoinRequest[] @relation("GroupJoinReviewer")
   groupModerationActions GroupModerationAction[]
+  resolvedSupportTickets SupportTicket[] @relation("SupportTicketResolver")
+}
+
+model SupportTicket {
+  id                String   @id @default(cuid())
+  type              String
+  status            String   @default("OPEN")
+  requesterName     String
+  requesterEmail    String
+  subject           String
+  message           String
+  pageUrl           String?
+  ipAddress         String?
+  userAgent         String?
+  internalNote      String?
+  resolutionSummary String?
+  resolvedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  resolvedById String?
+  resolvedBy   User? @relation("SupportTicketResolver", fields: [resolvedById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+  @@index([requesterEmail, createdAt])
 }
 
 model Category {
