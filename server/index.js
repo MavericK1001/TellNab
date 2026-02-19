@@ -81,6 +81,12 @@ const SUPPORT_TICKET_PRIORITY = {
   LOW: "LOW",
 };
 
+const SUPPORT_MESSAGE_SENDER = {
+  MEMBER: "MEMBER",
+  AGENT: "AGENT",
+  SYSTEM: "SYSTEM",
+};
+
 const SUPPORT_SLA_HOURS = {
   [SUPPORT_TICKET_PRIORITY.URGENT]: 4,
   [SUPPORT_TICKET_PRIORITY.NORMAL]: 24,
@@ -116,6 +122,8 @@ const ADMIN_WALLET_MAX_ADJUST_CENTS = Math.max(
 );
 const AI_ASSIST_MODE = String(process.env.AI_ASSIST_MODE || "mock").toLowerCase();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const SUPPORT_PORTAL_URL = process.env.SUPPORT_PORTAL_URL || "https://support.tellnab.com";
+const SUPPORT_EMAIL_WEBHOOK_URL = process.env.SUPPORT_EMAIL_WEBHOOK_URL || "";
 
 const WALLET_BALANCE_TYPES = {
   PAID: "PAID",
@@ -230,7 +238,7 @@ const supportLimiter = rateLimit({
 });
 
 app.use("/api/auth", authLimiter);
-app.use("/api/support", supportLimiter);
+app.use("/api/support/tickets", supportLimiter);
 
 function createToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, {
@@ -1110,6 +1118,45 @@ function normalizeOptionalText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+async function sendSupportEmailNotification({ to, subject, text, meta = {} }) {
+  const target = normalizeOptionalText(to);
+  if (!target) {
+    return;
+  }
+
+  if (!SUPPORT_EMAIL_WEBHOOK_URL) {
+    console.log("[support-email][skipped] missing SUPPORT_EMAIL_WEBHOOK_URL", {
+      to: target,
+      subject,
+      meta,
+    });
+    return;
+  }
+
+  try {
+    const response = await fetch(SUPPORT_EMAIL_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        to: target,
+        subject,
+        text,
+        meta,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.error("[support-email][error] webhook rejected", {
+        status: response.status,
+        body,
+      });
+    }
+  } catch (error) {
+    console.error("[support-email][error] failed to send", error);
+  }
+}
+
 function getSupportSlaHours(priority) {
   return SUPPORT_SLA_HOURS[priority] || SUPPORT_SLA_HOURS[SUPPORT_TICKET_PRIORITY.NORMAL];
 }
@@ -1149,10 +1196,24 @@ function serializeSupportTicket(ticket) {
     isSlaBreached,
     internalNote: ticket.internalNote,
     resolutionSummary: ticket.resolutionSummary,
+    assignedTo: ticket.assignedTo || null,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     resolvedAt: ticket.resolvedAt,
     resolvedBy: ticket.resolvedBy || null,
+  };
+}
+
+function serializeSupportTicketMessage(message) {
+  return {
+    id: message.id,
+    ticketId: message.ticketId,
+    senderType: message.senderType,
+    senderName: message.senderName,
+    senderEmail: message.senderEmail,
+    senderUserId: message.senderUserId,
+    body: message.body,
+    createdAt: message.createdAt,
   };
 }
 
@@ -1464,10 +1525,38 @@ const supportTicketAdminUpdateSchema = z
       .optional(),
     internalNote: z.string().max(1000).nullable().optional(),
     resolutionSummary: z.string().max(1000).nullable().optional(),
+    assignedToId: z.string().min(1).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field is required",
   });
+
+const supportTicketThreadLookupSchema = z.object({
+  requesterEmail: z.string().email().max(150),
+});
+
+const supportTicketMemberReplySchema = z.object({
+  requesterEmail: z.string().email().max(150),
+  message: z.string().min(1).max(5000),
+});
+
+const supportTicketMemberCloseSchema = z.object({
+  requesterEmail: z.string().email().max(150),
+});
+
+const supportTicketAgentReplySchema = z.object({
+  message: z.string().min(1).max(5000),
+  status: z
+    .enum([
+      SUPPORT_TICKET_STATUS.OPEN,
+      SUPPORT_TICKET_STATUS.IN_PROGRESS,
+      SUPPORT_TICKET_STATUS.RESOLVED,
+      SUPPORT_TICKET_STATUS.CLOSED,
+    ])
+    .optional(),
+  resolutionSummary: z.string().max(1000).nullable().optional(),
+  notifyByEmail: z.boolean().optional().default(true),
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "tellnab-server" });
@@ -1494,21 +1583,49 @@ app.post("/api/support/tickets", async (req, res) => {
       return res.status(400).json({ message: "Invalid page URL" });
     }
 
-    const ticket = await prisma.supportTicket.create({
-      data: {
-        type: data.type,
-        priority,
-        status: SUPPORT_TICKET_STATUS.OPEN,
-        requesterName: data.requesterName.trim(),
-        requesterEmail: data.requesterEmail.toLowerCase(),
-        subject: data.subject.trim(),
-        message: data.message.trim(),
-        pageUrl: safePageUrl,
-        firstResponseDueAt,
-        ipAddress: req.ip || null,
-        userAgent: normalizeOptionalText(req.headers["user-agent"]),
-      },
+    const ticket = await prisma.$transaction(async (tx) => {
+      const created = await tx.supportTicket.create({
+        data: {
+          type: data.type,
+          priority,
+          status: SUPPORT_TICKET_STATUS.OPEN,
+          requesterName: data.requesterName.trim(),
+          requesterEmail: data.requesterEmail.toLowerCase(),
+          subject: data.subject.trim(),
+          message: data.message.trim(),
+          pageUrl: safePageUrl,
+          firstResponseDueAt,
+          ipAddress: req.ip || null,
+          userAgent: normalizeOptionalText(req.headers["user-agent"]),
+        },
+      });
+
+      await tx.supportTicketMessage.create({
+        data: {
+          ticketId: created.id,
+          senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+          senderName: created.requesterName,
+          senderEmail: created.requesterEmail,
+          body: created.message,
+        },
+      });
+
+      return tx.supportTicket.findUnique({
+        where: { id: created.id },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+        },
+      });
     });
+
+    if (!ticket) {
+      return res.status(500).json({ message: "Failed to create support ticket" });
+    }
 
     return res.status(201).json({
       message: "Support request received. We will get back to you soon.",
@@ -1534,6 +1651,9 @@ app.post("/api/support/tickets/status", async (req, res) => {
         resolvedBy: {
           select: { id: true, name: true, role: true },
         },
+        assignedTo: {
+          select: { id: true, name: true, role: true },
+        },
       },
     });
 
@@ -1557,6 +1677,7 @@ app.post("/api/support/tickets/status", async (req, res) => {
         firstResponseAt: responseTicket.firstResponseAt,
         isSlaBreached: responseTicket.isSlaBreached,
         resolutionSummary: responseTicket.resolutionSummary,
+        assignedTo: responseTicket.assignedTo,
         createdAt: responseTicket.createdAt,
         updatedAt: responseTicket.updatedAt,
         resolvedAt: responseTicket.resolvedAt,
@@ -1616,6 +1737,9 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
         resolvedBy: {
           select: { id: true, name: true, role: true },
         },
+        assignedTo: {
+          select: { id: true, name: true, role: true, email: true },
+        },
       },
     });
 
@@ -1661,6 +1785,9 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
         ...(data.resolutionSummary !== undefined
           ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
           : {}),
+        ...(data.assignedToId !== undefined
+          ? { assignedToId: normalizeOptionalText(data.assignedToId) }
+          : {}),
         ...(shouldMarkResolved
           ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
           : { resolvedAt: null, resolvedById: null }),
@@ -1668,6 +1795,9 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
       include: {
         resolvedBy: {
           select: { id: true, name: true, role: true },
+        },
+        assignedTo: {
+          select: { id: true, name: true, role: true, email: true },
         },
       },
     });
@@ -1680,6 +1810,426 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
     return res.status(500).json({ message: "Failed to update support ticket" });
+  }
+});
+
+app.get("/api/support/agent/me", authRequired, moderatorOrAdminRequired, async (req, res) => {
+  return res.json({
+    user: {
+      id: req.user.id,
+      name: req.user.name,
+      email: req.user.email,
+      role: req.user.role,
+    },
+  });
+});
+
+app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, async (req, res) => {
+  try {
+    const status = typeof req.query.status === "string" ? req.query.status.trim().toUpperCase() : "";
+    const type = typeof req.query.type === "string" ? req.query.type.trim().toUpperCase() : "";
+    const priority =
+      typeof req.query.priority === "string" ? req.query.priority.trim().toUpperCase() : "";
+    const assigned = typeof req.query.assigned === "string" ? req.query.assigned.trim().toLowerCase() : "";
+    const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const limitRaw = Number(req.query.limit || 100);
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 100;
+
+    if (status && !Object.values(SUPPORT_TICKET_STATUS).includes(status)) {
+      return res.status(400).json({ message: "Invalid support ticket status filter" });
+    }
+
+    if (type && !Object.values(SUPPORT_TICKET_TYPE).includes(type)) {
+      return res.status(400).json({ message: "Invalid support ticket type filter" });
+    }
+
+    if (priority && !Object.values(SUPPORT_TICKET_PRIORITY).includes(priority)) {
+      return res.status(400).json({ message: "Invalid support ticket priority filter" });
+    }
+
+    const where = {
+      ...(status ? { status } : {}),
+      ...(type ? { type } : {}),
+      ...(priority ? { priority } : {}),
+      ...(assigned === "mine"
+        ? { assignedToId: req.user.id }
+        : assigned === "unassigned"
+          ? { assignedToId: null }
+          : {}),
+      ...(search
+        ? {
+            OR: [
+              { requesterName: { contains: search } },
+              { requesterEmail: { contains: search } },
+              { subject: { contains: search } },
+              { message: { contains: search } },
+            ],
+          }
+        : {}),
+    };
+
+    const tickets = await prisma.supportTicket.findMany({
+      where,
+      orderBy: [{ updatedAt: "desc" }],
+      take: limit,
+      include: {
+        resolvedBy: {
+          select: { id: true, name: true, role: true },
+        },
+        assignedTo: {
+          select: { id: true, name: true, role: true, email: true },
+        },
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
+    });
+
+    return res.json({
+      tickets: tickets.map((ticket) => {
+        const serialized = serializeSupportTicket(ticket);
+        return {
+          ...serialized,
+          latestMessage: ticket.messages[0] ? serializeSupportTicketMessage(ticket.messages[0]) : null,
+        };
+      }),
+    });
+  } catch {
+    return res.status(500).json({ message: "Failed to fetch support tickets" });
+  }
+});
+
+app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired, async (req, res) => {
+  try {
+    const ticket = await prisma.supportTicket.findUnique({
+      where: { id: req.params.id },
+      include: {
+        resolvedBy: {
+          select: { id: true, name: true, role: true },
+        },
+        assignedTo: {
+          select: { id: true, name: true, role: true, email: true },
+        },
+        messages: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Support ticket not found" });
+    }
+
+    return res.json({
+      ticket: serializeSupportTicket(ticket),
+      messages: ticket.messages.map((message) => serializeSupportTicketMessage(message)),
+    });
+  } catch {
+    return res.status(500).json({ message: "Failed to fetch support ticket" });
+  }
+});
+
+app.patch("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired, async (req, res) => {
+  try {
+    const data = supportTicketAdminUpdateSchema.parse(req.body || {});
+    const existing = await prisma.supportTicket.findUnique({ where: { id: req.params.id } });
+
+    if (!existing) {
+      return res.status(404).json({ message: "Support ticket not found" });
+    }
+
+    if (data.assignedToId) {
+      const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId } });
+      if (!assignee || (assignee.role !== ROLES.ADMIN && assignee.role !== ROLES.MODERATOR)) {
+        return res.status(400).json({ message: "Assigned support user must be admin or moderator" });
+      }
+    }
+
+    const nextStatus = data.status || existing.status;
+    const nextPriority = data.priority || existing.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
+    const shouldMarkResolved =
+      nextStatus === SUPPORT_TICKET_STATUS.RESOLVED || nextStatus === SUPPORT_TICKET_STATUS.CLOSED;
+    const shouldMarkFirstResponse =
+      !existing.firstResponseAt &&
+      (nextStatus === SUPPORT_TICKET_STATUS.IN_PROGRESS || shouldMarkResolved);
+
+    const updated = await prisma.supportTicket.update({
+      where: { id: existing.id },
+      data: {
+        ...(data.status ? { status: data.status } : {}),
+        ...(data.priority ? { priority: data.priority } : {}),
+        ...(data.priority && !existing.firstResponseAt
+          ? {
+              firstResponseDueAt: new Date(
+                new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
+              ),
+            }
+          : {}),
+        ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
+        ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
+        ...(data.resolutionSummary !== undefined
+          ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
+          : {}),
+        ...(data.assignedToId !== undefined
+          ? { assignedToId: normalizeOptionalText(data.assignedToId) }
+          : {}),
+        ...(shouldMarkResolved
+          ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
+          : { resolvedAt: null, resolvedById: null }),
+      },
+      include: {
+        resolvedBy: {
+          select: { id: true, name: true, role: true },
+        },
+        assignedTo: {
+          select: { id: true, name: true, role: true, email: true },
+        },
+      },
+    });
+
+    return res.json({ ticket: serializeSupportTicket(updated) });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to update support ticket" });
+  }
+});
+
+app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdminRequired, async (req, res) => {
+  try {
+    const data = supportTicketAgentReplySchema.parse(req.body || {});
+    const existing = await prisma.supportTicket.findUnique({ where: { id: req.params.id } });
+
+    if (!existing) {
+      return res.status(404).json({ message: "Support ticket not found" });
+    }
+
+    const nextStatus = data.status || SUPPORT_TICKET_STATUS.IN_PROGRESS;
+    const shouldMarkResolved =
+      nextStatus === SUPPORT_TICKET_STATUS.RESOLVED || nextStatus === SUPPORT_TICKET_STATUS.CLOSED;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.supportTicketMessage.create({
+        data: {
+          ticketId: existing.id,
+          senderType: SUPPORT_MESSAGE_SENDER.AGENT,
+          senderName: req.user.name,
+          senderEmail: req.user.email,
+          senderUserId: req.user.id,
+          body: data.message.trim(),
+        },
+      });
+
+      return tx.supportTicket.update({
+        where: { id: existing.id },
+        data: {
+          status: nextStatus,
+          firstResponseAt: existing.firstResponseAt || new Date(),
+          ...(data.resolutionSummary !== undefined
+            ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
+            : {}),
+          ...(shouldMarkResolved
+            ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
+            : { resolvedAt: null, resolvedById: null }),
+        },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+        },
+      });
+    });
+
+    const responseLink = `${SUPPORT_PORTAL_URL.replace(/\/$/, "")}/?view=member&ticketId=${encodeURIComponent(
+      existing.id,
+    )}&email=${encodeURIComponent(existing.requesterEmail)}`;
+
+    if (data.notifyByEmail !== false) {
+      await sendSupportEmailNotification({
+        to: existing.requesterEmail,
+        subject: `TellNab support replied to ticket ${existing.id}`,
+        text: [
+          `Hello ${existing.requesterName},`,
+          "",
+          "Our support team has replied to your ticket.",
+          `Ticket ID: ${existing.id}`,
+          `Subject: ${existing.subject}`,
+          "",
+          `Open chat and reply or close the ticket: ${responseLink}`,
+        ].join("\n"),
+        meta: {
+          ticketId: existing.id,
+          type: "agent_reply",
+        },
+      });
+    }
+
+    return res.json({
+      ticket: serializeSupportTicket(updated),
+      notified: data.notifyByEmail !== false,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to send support reply" });
+  }
+});
+
+app.get("/api/support/tickets/:id/thread", async (req, res) => {
+  try {
+    const query = supportTicketThreadLookupSchema.parse(req.query || {});
+    const requesterEmail = query.requesterEmail.toLowerCase();
+
+    const ticket = await prisma.supportTicket.findFirst({
+      where: {
+        id: req.params.id,
+        requesterEmail,
+      },
+      include: {
+        resolvedBy: {
+          select: { id: true, name: true, role: true },
+        },
+        assignedTo: {
+          select: { id: true, name: true, role: true },
+        },
+        messages: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    return res.json({
+      ticket: serializeSupportTicket(ticket),
+      messages: ticket.messages.map((message) => serializeSupportTicketMessage(message)),
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to load support thread" });
+  }
+});
+
+app.post("/api/support/tickets/:id/replies", async (req, res) => {
+  try {
+    const data = supportTicketMemberReplySchema.parse(req.body || {});
+    const requesterEmail = data.requesterEmail.toLowerCase();
+
+    const existing = await prisma.supportTicket.findFirst({
+      where: {
+        id: req.params.id,
+        requesterEmail,
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    if (existing.status === SUPPORT_TICKET_STATUS.CLOSED) {
+      return res.status(400).json({ message: "Closed tickets cannot receive new replies" });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.supportTicketMessage.create({
+        data: {
+          ticketId: existing.id,
+          senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+          senderName: existing.requesterName,
+          senderEmail: requesterEmail,
+          body: data.message.trim(),
+        },
+      });
+
+      return tx.supportTicket.update({
+        where: { id: existing.id },
+        data: {
+          status:
+            existing.status === SUPPORT_TICKET_STATUS.RESOLVED
+              ? SUPPORT_TICKET_STATUS.IN_PROGRESS
+              : existing.status,
+          resolvedAt: null,
+          resolvedById: null,
+        },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+        },
+      });
+    });
+
+    return res.status(201).json({
+      ticket: serializeSupportTicket(updated),
+      message: "Reply sent to support team",
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to send ticket reply" });
+  }
+});
+
+app.post("/api/support/tickets/:id/close", async (req, res) => {
+  try {
+    const data = supportTicketMemberCloseSchema.parse(req.body || {});
+    const requesterEmail = data.requesterEmail.toLowerCase();
+
+    const existing = await prisma.supportTicket.findFirst({
+      where: {
+        id: req.params.id,
+        requesterEmail,
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    const updated = await prisma.supportTicket.update({
+      where: { id: existing.id },
+      data: {
+        status: SUPPORT_TICKET_STATUS.CLOSED,
+        resolvedAt: existing.resolvedAt || new Date(),
+      },
+      include: {
+        resolvedBy: {
+          select: { id: true, name: true, role: true },
+        },
+        assignedTo: {
+          select: { id: true, name: true, role: true, email: true },
+        },
+      },
+    });
+
+    await prisma.supportTicketMessage.create({
+      data: {
+        ticketId: existing.id,
+        senderType: SUPPORT_MESSAGE_SENDER.SYSTEM,
+        body: "Ticket closed by member.",
+      },
+    });
+
+    return res.json({ ticket: serializeSupportTicket(updated) });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to close ticket" });
   }
 });
 
