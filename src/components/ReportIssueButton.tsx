@@ -6,18 +6,21 @@ export default function ReportIssueButton() {
   const supportBase =
     (import.meta.env.VITE_SUPPORT_SITE_URL as string | undefined) ||
     DEFAULT_SUPPORT_URL;
+  const supportVersion = "20260220";
 
   const pageUrl =
     typeof window !== "undefined"
       ? window.location.href
       : "https://tellnab.com";
 
-  const href = `${supportBase.replace(
-    /\/$/,
-    "",
-  )}/?type=ISSUE&pageUrl=${encodeURIComponent(
+  const params = new URLSearchParams({
+    type: "ISSUE",
     pageUrl,
-  )}&subject=${encodeURIComponent("Issue report")}`;
+    subject: "Issue report",
+    v: supportVersion,
+  });
+
+  const href = `${supportBase.replace(/\/$/, "")}/?${params.toString()}`;
 
   return (
     <a

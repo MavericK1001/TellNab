@@ -80,6 +80,7 @@ h2 {
 }
 
 .panel {
+  background: #131828;
   background: color-mix(in oklab, var(--panel), black 5%);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -122,16 +123,22 @@ h2 {
 }
 
 .status-pill.operational {
+  border-color: #2f8f6a;
+  color: var(--ok);
   border-color: color-mix(in oklab, var(--ok), black 30%);
   color: var(--ok);
 }
 
 .status-pill.incident {
+  border-color: #b85d5d;
+  color: var(--error);
   border-color: color-mix(in oklab, var(--error), black 30%);
   color: var(--error);
 }
 
 .status-pill.maintenance {
+  border-color: #5e6fd9;
+  color: #afbbff;
   border-color: color-mix(in oklab, var(--accent), black 30%);
   color: #afbbff;
 }
