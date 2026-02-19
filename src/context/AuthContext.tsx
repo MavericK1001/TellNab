@@ -34,7 +34,9 @@ let googleScriptPromise: Promise<void> | null = null;
 
 function loadGoogleIdentityScript() {
   if (typeof window === "undefined") {
-    return Promise.reject(new Error("Google sign-in is not available in this environment."));
+    return Promise.reject(
+      new Error("Google sign-in is not available in this environment."),
+    );
   }
 
   if (window.google?.accounts?.oauth2) {
@@ -52,9 +54,13 @@ function loadGoogleIdentityScript() {
 
     if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Failed to load Google sign-in script.")), {
-        once: true,
-      });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load Google sign-in script.")),
+        {
+          once: true,
+        },
+      );
       return;
     }
 
@@ -63,7 +69,8 @@ function loadGoogleIdentityScript() {
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Google sign-in script."));
+    script.onerror = () =>
+      reject(new Error("Failed to load Google sign-in script."));
     document.head.appendChild(script);
   });
 
@@ -71,7 +78,9 @@ function loadGoogleIdentityScript() {
 }
 
 async function requestGoogleAuthorizationCode() {
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as
+    | string
+    | undefined;
   if (!googleClientId) {
     throw new Error("Google sign-in is not configured for this app.");
   }
@@ -88,6 +97,7 @@ async function requestGoogleAuthorizationCode() {
       client_id: googleClientId,
       scope: "openid email profile",
       ux_mode: "popup",
+      select_account: true,
       callback: (response: { code?: string; error?: string }) => {
         if (response.code) {
           resolve(response.code);
@@ -114,6 +124,7 @@ declare global {
             client_id: string;
             scope: string;
             ux_mode: "popup" | "redirect";
+            select_account?: boolean;
             callback: (response: { code?: string; error?: string }) => void;
             error_callback?: () => void;
           }) => { requestCode: () => void };
