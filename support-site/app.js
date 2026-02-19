@@ -55,6 +55,25 @@ function setStatus(text, tone = "") {
   statusEl.className = tone;
 }
 
+function normalizeValidationMessage(apiError) {
+  if (!apiError || typeof apiError !== "object") {
+    return null;
+  }
+
+  if (Array.isArray(apiError.issues) && apiError.issues.length > 0) {
+    const firstIssue = apiError.issues[0];
+    if (firstIssue && typeof firstIssue.message === "string") {
+      return firstIssue.message;
+    }
+  }
+
+  if (typeof apiError.message === "string") {
+    return apiError.message;
+  }
+
+  return null;
+}
+
 function renderStatusItems() {
   statusListEl.innerHTML = statusItems
     .map(
@@ -112,6 +131,23 @@ form.addEventListener("submit", async (event) => {
     message: String(data.get("message") || "").trim(),
   };
 
+  if (payload.requesterName.length < 2) {
+    setStatus("Please enter your full name (min 2 characters).", "error");
+    return;
+  }
+  if (!payload.requesterEmail.includes("@")) {
+    setStatus("Please enter a valid email address.", "error");
+    return;
+  }
+  if (payload.subject.length < 5) {
+    setStatus("Subject must be at least 5 characters.", "error");
+    return;
+  }
+  if (payload.message.length < 20) {
+    setStatus("Message must be at least 20 characters.", "error");
+    return;
+  }
+
   submitBtn.disabled = true;
   setStatus("Submitting...", "");
 
@@ -146,8 +182,9 @@ form.addEventListener("submit", async (event) => {
     }
 
     if (!response.ok) {
+      const detailedMessage = normalizeValidationMessage(json);
       throw new Error(
-        json?.message ||
+        detailedMessage ||
           "Failed to submit request. If this persists, check CORS_ORIGINS includes support.tellnab.com.",
       );
     }
