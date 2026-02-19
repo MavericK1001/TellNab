@@ -1117,6 +1117,10 @@ const socialAuthSchema = z.object({
   avatarUrl: z.string().max(5000).optional(),
 });
 
+const googleSocialCodeSchema = z.object({
+  code: z.string().min(8),
+});
+
 const profileUpdateSchema = z
   .object({
     name: z.string().min(2).max(80).optional(),
@@ -1462,6 +1466,135 @@ app.post("/api/auth/social", async (req, res) => {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
     return res.status(500).json({ message: "Social login failed" });
+  }
+});
+
+app.post("/api/auth/social/google-code", async (req, res) => {
+  try {
+    const { code } = googleSocialCodeSchema.parse(req.body);
+
+    const googleClientId = process.env.GOOGLE_CLIENT_ID;
+    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!googleClientId || !googleClientSecret) {
+      return res.status(503).json({
+        message: "Google sign-in is not configured on the server.",
+      });
+    }
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        code,
+        client_id: googleClientId,
+        client_secret: googleClientSecret,
+        redirect_uri: "postmessage",
+        grant_type: "authorization_code",
+      }).toString(),
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      return res.status(400).json({ message: "Google authorization failed." });
+    }
+
+    const userInfoResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+      },
+    });
+
+    const userInfo = await userInfoResponse.json();
+    if (!userInfoResponse.ok || !userInfo.sub || !userInfo.email) {
+      return res.status(400).json({ message: "Google user profile could not be verified." });
+    }
+
+    if (userInfo.email_verified === false) {
+      return res.status(400).json({ message: "Google account email is not verified." });
+    }
+
+    const provider = SOCIAL_AUTH_PROVIDER.GOOGLE;
+    const providerSubject = String(userInfo.sub).toLowerCase();
+    const providerField = "googleSub";
+    const incomingEmail = String(userInfo.email).toLowerCase();
+    const incomingName = normalizeOptionalText(userInfo.name || "") || socialFallbackName(provider);
+    const safeAvatar = normalizeOptionalText(userInfo.picture || "");
+
+    if (safeAvatar && !isValidProfileImageValue(safeAvatar)) {
+      return res.status(400).json({ message: "Invalid avatar image URL" });
+    }
+
+    let user = await prisma.user.findFirst({
+      where: {
+        [providerField]: providerSubject,
+      },
+    });
+
+    if (!user) {
+      user = await prisma.user.findUnique({ where: { email: incomingEmail } });
+    }
+
+    if (!user) {
+      const randomPassword = await bcrypt.hash(`${provider}:${providerSubject}:${Date.now()}`, 12);
+      user = await prisma.user.create({
+        data: {
+          email: incomingEmail,
+          name: incomingName,
+          passwordHash: randomPassword,
+          hasPassword: false,
+          authProvider: provider,
+          avatarUrl: safeAvatar || null,
+          role: ROLES.MEMBER,
+          isActive: true,
+          [providerField]: providerSubject,
+        },
+      });
+    } else {
+      if (!user.isActive) {
+        return res.status(403).json({ message: "Account suspended" });
+      }
+
+      const updateData = {
+        authProvider: provider,
+      };
+
+      if (!user[providerField]) {
+        updateData[providerField] = providerSubject;
+      }
+
+      if (safeAvatar && !user.avatarUrl) {
+        updateData.avatarUrl = safeAvatar;
+      }
+
+      if (incomingName && user.name !== incomingName) {
+        updateData.name = incomingName;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: updateData,
+        });
+      }
+    }
+
+    const token = createToken(user);
+    res.cookie("tn_auth", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 12,
+    });
+
+    return res.json({ user: sanitizeUser(user), token });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Google social login failed" });
   }
 });
 

@@ -234,6 +234,14 @@ export async function socialLoginAccount(payload: {
   return data;
 }
 
+export async function socialLoginGoogleCode(payload: {
+  code: string;
+}): Promise<AuthResponse> {
+  const data = await postWithFallback<AuthResponse>("/auth/social/google-code", payload);
+  setAuthToken(data.token);
+  return data;
+}
+
 export async function logoutAccount(): Promise<void> {
   await api.post("/auth/logout");
   setAuthToken(undefined);

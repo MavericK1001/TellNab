@@ -10,7 +10,7 @@ import {
   loginAccount,
   logoutAccount,
   registerAccount,
-  socialLoginAccount,
+  socialLoginGoogleCode,
   setAuthToken,
 } from "../services/api";
 import { AuthUser } from "../types";
@@ -30,23 +30,100 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  function getSocialSubject(provider: "google" | "apple") {
-    const key = `tellnab_social_subject_${provider}`;
-    const fallback = `${provider}-${Math.random().toString(36).slice(2, 12)}`;
+let googleScriptPromise: Promise<void> | null = null;
 
-    if (typeof window === "undefined") return fallback;
-
-    try {
-      const existing = window.localStorage.getItem(key);
-      if (existing) return existing;
-      window.localStorage.setItem(key, fallback);
-      return fallback;
-    } catch {
-      return fallback;
-    }
+function loadGoogleIdentityScript() {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Google sign-in is not available in this environment."));
   }
 
+  if (window.google?.accounts?.oauth2) {
+    return Promise.resolve();
+  }
+
+  if (googleScriptPromise) {
+    return googleScriptPromise;
+  }
+
+  googleScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src="https://accounts.google.com/gsi/client"]',
+    );
+
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google sign-in script.")), {
+        once: true,
+      });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google sign-in script."));
+    document.head.appendChild(script);
+  });
+
+  return googleScriptPromise;
+}
+
+async function requestGoogleAuthorizationCode() {
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  if (!googleClientId) {
+    throw new Error("Google sign-in is not configured for this app.");
+  }
+
+  await loadGoogleIdentityScript();
+
+  const initCodeClient = window.google?.accounts?.oauth2?.initCodeClient;
+  if (!initCodeClient) {
+    throw new Error("Google sign-in is unavailable right now.");
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const client = initCodeClient({
+      client_id: googleClientId,
+      scope: "openid email profile",
+      ux_mode: "popup",
+      callback: (response: { code?: string; error?: string }) => {
+        if (response.code) {
+          resolve(response.code);
+          return;
+        }
+
+        reject(new Error(response.error || "Google sign-in was cancelled."));
+      },
+      error_callback: () => {
+        reject(new Error("Google sign-in popup was closed or blocked."));
+      },
+    });
+
+    client.requestCode();
+  });
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts?: {
+        oauth2?: {
+          initCodeClient?: (config: {
+            client_id: string;
+            scope: string;
+            ux_mode: "popup" | "redirect";
+            callback: (response: { code?: string; error?: string }) => void;
+            error_callback?: () => void;
+          }) => { requestCode: () => void };
+        };
+      };
+    };
+  }
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -81,16 +158,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function socialLogin(
     provider: "google" | "apple",
-    options?: { email?: string; name?: string; avatarUrl?: string },
+    _options?: { email?: string; name?: string; avatarUrl?: string },
   ) {
-    const response = await socialLoginAccount({
-      provider,
-      providerSubject: getSocialSubject(provider),
-      email: options?.email,
-      name: options?.name,
-      avatarUrl: options?.avatarUrl,
-    });
-    setUser(response.user);
+    if (provider === "google") {
+      const code = await requestGoogleAuthorizationCode();
+      const response = await socialLoginGoogleCode({ code });
+      setUser(response.user);
+      return;
+    }
+
+    throw new Error(
+      "Apple sign-in requires Apple OAuth configuration and is not yet enabled.",
+    );
   }
 
   async function logout() {
