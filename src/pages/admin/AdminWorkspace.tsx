@@ -6,6 +6,7 @@ import {
   adminAssignBadge,
   approveGroupJoinRequest,
   createAdminCategory,
+  generateModerationHintWithAi,
   getAdminAuditLogs,
   getAdminBadges,
   getAdminOverview,
@@ -34,6 +35,7 @@ import {
   BadgeDefinition,
   CategoryItem,
   ModerationActivityItem,
+  ModerationAiHintResult,
   ModerationGroupRequest,
   UserRole,
 } from "../../types";
@@ -126,6 +128,10 @@ export default function AdminWorkspace() {
   const [groupHistory, setGroupHistory] = useState<ModerationActivityItem[]>(
     [],
   );
+  const [moderationHints, setModerationHints] = useState<
+    Record<string, ModerationAiHintResult>
+  >({});
+  const [hintLoading, setHintLoading] = useState<Record<string, boolean>>({});
 
   const [moderationStatus, setModerationStatus] =
     useState<AdviceStatus>("PENDING");
@@ -417,7 +423,7 @@ export default function AdminWorkspace() {
 
   async function onToggleFlag(
     item: AdviceItem,
-    key: "isLocked" | "isFeatured",
+    key: "isLocked" | "isFeatured" | "isSpam",
   ) {
     try {
       setActionLoading(true);
@@ -428,7 +434,13 @@ export default function AdminWorkspace() {
         getAdminOverview().then(setOverview),
       ]);
       toast.success(
-        `Thread ${key === "isLocked" ? "lock" : "feature"} flag updated.`,
+        `Thread ${
+          key === "isLocked"
+            ? "lock"
+            : key === "isFeatured"
+            ? "feature"
+            : "spam"
+        } flag updated.`,
       );
     } catch (err) {
       const message = parseApiError(err, "Failed to update thread flags.");
@@ -436,6 +448,28 @@ export default function AdminWorkspace() {
       toast.error(message);
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function onGenerateModerationHint(item: AdviceItem) {
+    try {
+      setHintLoading((current) => ({ ...current, [item.id]: true }));
+      const hint = await generateModerationHintWithAi({
+        title: item.title,
+        body: item.body,
+        status: item.status,
+        isLocked: item.isLocked,
+        isFeatured: item.isFeatured,
+        isSpam: item.isSpam,
+      });
+      setModerationHints((current) => ({ ...current, [item.id]: hint }));
+      toast.success("AI triage hint ready.");
+    } catch (err) {
+      const message = parseApiError(err, "Failed to generate AI hint.");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setHintLoading((current) => ({ ...current, [item.id]: false }));
     }
   }
 
@@ -769,6 +803,9 @@ export default function AdminWorkspace() {
                     <span className={badgeClass(item.isLocked)}>
                       {item.isLocked ? "Locked" : "Unlocked"}
                     </span>
+                    <span className={badgeClass(item.isSpam)}>
+                      {item.isSpam ? "Spam" : "Not spam"}
+                    </span>
                   </div>
                   <p className="text-xs text-slate-400">
                     {new Date(item.createdAt).toLocaleString()}
@@ -816,7 +853,47 @@ export default function AdminWorkspace() {
                   >
                     {item.isLocked ? "Unlock" : "Lock"}
                   </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading}
+                    onClick={() => void onToggleFlag(item, "isSpam")}
+                  >
+                    {item.isSpam ? "Unmark spam" : "Mark spam"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={Boolean(hintLoading[item.id])}
+                    onClick={() => void onGenerateModerationHint(item)}
+                  >
+                    {hintLoading[item.id] ? "AI hint..." : "AI triage hint"}
+                  </Button>
                 </div>
+
+                {moderationHints[item.id] ? (
+                  <div className="mt-3 rounded-lg border border-violet-300/20 bg-violet-500/10 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full border border-violet-300/30 px-2 py-0.5 text-violet-100">
+                        AI: {moderationHints[item.id].provider}
+                      </span>
+                      <span className="rounded-full border border-white/20 px-2 py-0.5 text-slate-200">
+                        Suggested: {moderationHints[item.id].recommendedAction}
+                      </span>
+                      <span className="rounded-full border border-white/20 px-2 py-0.5 text-slate-200">
+                        Priority: {moderationHints[item.id].priority}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-200">
+                      {moderationHints[item.id].rationale}
+                    </p>
+                    {moderationHints[item.id].checks.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-300">
+                        {moderationHints[item.id].checks.map((check, index) => (
+                          <li key={`${check}-${index}`}>{check}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
               </Card>
             ))}
 

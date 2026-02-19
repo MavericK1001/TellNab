@@ -232,7 +232,7 @@ export default function AdviceCenter() {
 
   async function onFlags(
     id: string,
-    payload: { isLocked?: boolean; isFeatured?: boolean },
+    payload: { isLocked?: boolean; isFeatured?: boolean; isSpam?: boolean },
   ) {
     try {
       setQueueActionId(id);
@@ -292,8 +292,8 @@ export default function AdviceCenter() {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <section className="space-y-4 lg:col-span-2">
-        <Card>
-          <h1 className="bg-gradient-to-r from-violet-200 to-cyan-200 bg-clip-text text-2xl font-bold text-transparent">
+        <Card className="rounded-3xl border-white/15 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10">
+          <h1 className="bg-gradient-to-r from-violet-200 to-cyan-200 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
             Advice Section
           </h1>
           <p className="mt-1 text-sm text-slate-300">
@@ -308,7 +308,7 @@ export default function AdviceCenter() {
                 required
                 minLength={5}
                 placeholder="Advice title"
-                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
               />
               <textarea
                 name="body"
@@ -316,7 +316,7 @@ export default function AdviceCenter() {
                 minLength={10}
                 rows={4}
                 placeholder="Write your advice request"
-                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
               />
               <Button
                 type="submit"
@@ -343,7 +343,7 @@ export default function AdviceCenter() {
           )}
         </Card>
 
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
           <h2 className="text-xl font-semibold text-white">
             Approved advice feed
           </h2>
@@ -359,7 +359,7 @@ export default function AdviceCenter() {
                 key={item.id}
                 type="button"
                 onClick={() => setSelectedAdviceId(item.id)}
-                className="block w-full rounded-lg border border-white/10 bg-slate-950 p-4 text-left transition hover:border-violet-400/50"
+                className="block w-full rounded-xl border border-white/10 bg-slate-950 p-4 text-left transition hover:border-violet-400/50"
               >
                 <p className="text-base font-semibold text-white">
                   {item.title}
@@ -437,7 +437,7 @@ export default function AdviceCenter() {
       </section>
 
       <aside className="space-y-4">
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
           <h3 className="text-lg font-semibold text-white">Advice thread</h3>
           {selectedAdvice ? (
             <>
@@ -520,7 +520,7 @@ export default function AdviceCenter() {
                       placeholder={
                         replyTo ? "Write your reply" : "Write a comment/reply"
                       }
-                      className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                      className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
                     />
                     <Button type="submit" variant="secondary">
                       {replyTo ? "Reply" : "Add comment"}
@@ -537,7 +537,7 @@ export default function AdviceCenter() {
         </Card>
 
         {user ? (
-          <Card>
+          <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
             <h3 className="text-lg font-semibold text-white">Your watchlist</h3>
             <p className="mt-1 text-xs text-slate-400">
               Followed threads you want to revisit.
@@ -547,7 +547,7 @@ export default function AdviceCenter() {
               {watchlist.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-lg border border-white/10 bg-slate-950 p-3"
+                  className="rounded-xl border border-white/10 bg-slate-950 p-3"
                 >
                   <p className="line-clamp-1 text-sm font-semibold text-white">
                     {item.title}
@@ -583,7 +583,7 @@ export default function AdviceCenter() {
         ) : null}
 
         {canModerate ? (
-          <Card>
+          <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-lg font-semibold text-white">
                 Moderation queue
@@ -600,7 +600,7 @@ export default function AdviceCenter() {
                     key={status}
                     type="button"
                     onClick={() => setQueueStatus(status)}
-                    className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                    className={`rounded-xl border px-2 py-1.5 text-xs font-semibold transition ${
                       queueStatus === status
                         ? "border-violet-300/50 bg-violet-500/20 text-violet-100"
                         : "border-white/10 bg-slate-950 text-slate-300 hover:border-white/20"
@@ -686,6 +686,20 @@ export default function AdviceCenter() {
                     >
                       Open thread
                     </Link>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() =>
+                        void onFlags(item.id, {
+                          isSpam: !item.isSpam,
+                        })
+                      }
+                    >
+                      {item.isSpam ? "Mark clean" : "Mark spam"}
+                    </Button>
                   </div>
 
                   {queueActionId === item.id ? (

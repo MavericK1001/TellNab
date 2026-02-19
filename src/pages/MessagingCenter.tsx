@@ -109,7 +109,7 @@ export default function MessagingCenter() {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <section className="space-y-4">
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10">
           <h2 className="text-lg font-semibold text-white">
             Start conversation
           </h2>
@@ -124,7 +124,7 @@ export default function MessagingCenter() {
                 setSelectedRecipient(null);
               }}
               placeholder="Type at least 2 characters"
-              className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+              className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
             />
 
             {selectedRecipient ? (
@@ -146,7 +146,7 @@ export default function MessagingCenter() {
             ) : null}
 
             {!searchingUsers && recipientResults.length > 0 ? (
-              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 p-2">
+              <div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-white/10 bg-slate-950 p-2">
                 {recipientResults.map((candidate) => (
                   <button
                     key={candidate.id}
@@ -156,7 +156,7 @@ export default function MessagingCenter() {
                       setRecipientQuery(candidate.name);
                       setRecipientResults([]);
                     }}
-                    className="block w-full rounded-lg border border-white/10 px-3 py-2 text-left transition hover:border-violet-300/40 hover:bg-white/5"
+                    className="block w-full rounded-xl border border-white/10 px-3 py-2 text-left transition hover:border-violet-300/40 hover:bg-white/5"
                   >
                     <p className="text-sm text-white">{candidate.name}</p>
                     <p className="text-xs text-slate-400">{candidate.email}</p>
@@ -171,7 +171,7 @@ export default function MessagingCenter() {
           </form>
         </Card>
 
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
           <h2 className="text-lg font-semibold text-white">Conversations</h2>
           {error ? <p className="mt-2 text-sm text-rose-300">{error}</p> : null}
           <div className="mt-3 space-y-2">
@@ -180,7 +180,7 @@ export default function MessagingCenter() {
                 key={conversation.id}
                 type="button"
                 onClick={() => setActiveConversationId(conversation.id)}
-                className="block w-full rounded-lg border border-white/10 bg-slate-950 p-3 text-left transition hover:border-violet-400/50"
+                className="block w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-left transition hover:border-violet-400/50"
               >
                 <p className="text-sm text-white">
                   {conversation.participants
@@ -200,7 +200,7 @@ export default function MessagingCenter() {
       </section>
 
       <section className="lg:col-span-2">
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
           <h1 className="text-2xl font-bold text-white">Messaging Section</h1>
           <p className="mt-1 text-sm text-slate-300">
             Private direct messaging between members.
@@ -212,7 +212,7 @@ export default function MessagingCenter() {
                 {messages.map((message) => (
                   <div
                     key={message.id}
-                    className="rounded-lg border border-white/10 bg-slate-950 p-3"
+                    className="rounded-xl border border-white/10 bg-slate-950 p-3"
                   >
                     <p className="text-sm text-slate-200">{message.body}</p>
                     <p className="mt-1 text-xs text-slate-400">
@@ -230,7 +230,7 @@ export default function MessagingCenter() {
                   name="body"
                   required
                   placeholder="Type message"
-                  className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
                 />
                 <Button type="submit">Send</Button>
               </form>

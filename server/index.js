@@ -57,6 +57,11 @@ const GROUP_JOIN_STATUS = {
   REJECTED: "REJECTED",
 };
 
+const SOCIAL_AUTH_PROVIDER = {
+  GOOGLE: "GOOGLE",
+  APPLE: "APPLE",
+};
+
 const prisma = new PrismaClient();
 const app = express();
 
@@ -82,6 +87,8 @@ const ADMIN_WALLET_MAX_ADJUST_CENTS = Math.max(
   100,
   Number(process.env.ADMIN_WALLET_MAX_ADJUST_CENTS || 10000),
 );
+const AI_ASSIST_MODE = String(process.env.AI_ASSIST_MODE || "mock").toLowerCase();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
 const WALLET_BALANCE_TYPES = {
   PAID: "PAID",
@@ -157,6 +164,11 @@ function sanitizeUser(user) {
     id: user.id,
     email: user.email,
     name: user.name,
+    bio: user.bio || "",
+    avatarUrl: user.avatarUrl || null,
+    coverImageUrl: user.coverImageUrl || null,
+    authProvider: user.authProvider || "LOCAL",
+    hasPassword: user.hasPassword !== false,
     role: user.role,
     isActive: user.isActive,
     createdAt: user.createdAt,
@@ -209,6 +221,7 @@ function sanitizeAdvice(advice) {
     status: advice.status,
     isLocked: advice.isLocked,
     isFeatured: advice.isFeatured,
+    isSpam: advice.isSpam,
     isBoostActive: advice.isBoostActive,
     boostExpiresAt: advice.boostExpiresAt || null,
     holdReason: advice.holdReason,
@@ -413,6 +426,28 @@ function sanitizeAuditLog(log) {
   };
 }
 
+function sendError(res, { status, code, message, details }) {
+  const payload = {
+    ok: false,
+    error: {
+      code,
+      message,
+      details: details || undefined,
+    },
+    message,
+  };
+
+  if (details) {
+    payload.issues = details;
+  }
+
+  return res.status(status).json(payload);
+}
+
+function isPrismaNotFoundError(error) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2025");
+}
+
 async function applyWalletDelta(
   tx,
   { userId, balanceType, amountCents, reason, source, performedById = null },
@@ -551,6 +586,414 @@ async function resolveDefaultCategoryId() {
   return fallbackCategory?.id || null;
 }
 
+function normalizeText(value, maxLength) {
+  const cleaned = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!maxLength || cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, maxLength - 1).trim()}…`;
+}
+
+function isLikelySpamTitle(title) {
+  const cleaned = normalizeText(title, 160).toLowerCase();
+  if (!cleaned) return false;
+
+  const lettersOnly = cleaned.replace(/[^a-z]/g, "");
+  if (lettersOnly.length < 8) return false;
+
+  const hasNoSpaces = !/\s/.test(cleaned);
+  const uniqueRatio = new Set(lettersOnly).size / lettersOnly.length;
+  const vowelCount = (lettersOnly.match(/[aeiou]/g) || []).length;
+  const vowelRatio = vowelCount / lettersOnly.length;
+  const keyboardChunkHits = (lettersOnly.match(/asd|dsa|qwe|ewq|zxc|cxz|poi|iop|lkj|jkl/g) || []).length;
+
+  const bigramCounts = new Map();
+  for (let i = 0; i < lettersOnly.length - 1; i += 1) {
+    const bigram = lettersOnly.slice(i, i + 2);
+    bigramCounts.set(bigram, (bigramCounts.get(bigram) || 0) + 1);
+  }
+  const totalBigrams = Math.max(lettersOnly.length - 1, 1);
+  const repeatedBigramHits = Array.from(bigramCounts.values()).reduce(
+    (sum, count) => (count > 1 ? sum + count : sum),
+    0,
+  );
+  const repeatedBigramRatio = repeatedBigramHits / totalBigrams;
+
+  if (/(.)\1{3,}/.test(lettersOnly)) return true;
+
+  if (keyboardChunkHits >= 2) {
+    return true;
+  }
+
+  if (hasNoSpaces && uniqueRatio <= 0.34) return true;
+
+  if (hasNoSpaces && lettersOnly.length >= 10 && vowelRatio < 0.2) return true;
+
+  if (hasNoSpaces && lettersOnly.length >= 9 && uniqueRatio <= 0.5 && repeatedBigramRatio >= 0.5) {
+    return true;
+  }
+
+  if (lettersOnly.length >= 12 && uniqueRatio <= 0.55 && repeatedBigramRatio >= 0.58) {
+    return true;
+  }
+
+  const tokens = cleaned
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z]/g, ""))
+    .filter((token) => token.length >= 3);
+
+  if (tokens.length >= 2) {
+    const suspiciousTokens = tokens.filter((token) => {
+      const tokenUniqueRatio = new Set(token).size / token.length;
+      const tokenKeyboardHits = (token.match(/asd|dsa|qwe|ewq|zxc|cxz|poi|iop|lkj|jkl/g) || []).length;
+      return tokenKeyboardHits >= 1 || tokenUniqueRatio <= 0.45 || /(.)\1{2,}/.test(token);
+    }).length;
+
+    if (suspiciousTokens >= 2) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildTitleFromQuestion(question) {
+  const fallback = "Need advice on a personal decision";
+  if (!question) return fallback;
+
+  const firstSentence = normalizeText(question.split(/[.!?]/)[0], 90);
+  if (!firstSentence) return fallback;
+
+  const prefix = /^(i\s|my\s|we\s|our\s|should\s|is\s|am\s|can\s)/i.test(firstSentence)
+    ? "Advice needed: "
+    : "Need advice: ";
+
+  return normalizeText(`${prefix}${firstSentence}`, 120);
+}
+
+function buildMockAdviceAssist({ title, question, targetTone }) {
+  const toneLead =
+    targetTone === "direct"
+      ? "I need direct feedback."
+      : targetTone === "empathetic"
+        ? "I need practical advice, but please be kind."
+        : "I need balanced and honest advice.";
+
+  const cleanedQuestion = normalizeText(question, 2200);
+  const draftTitle = normalizeText(title, 120) || buildTitleFromQuestion(cleanedQuestion);
+
+  const draftBody = `${toneLead}\n\nContext:\n${cleanedQuestion}\n\nMain question:\nWhat should I do next, and why?\n\nConstraints:\n- Time\n- Money\n- Risk tolerance`;
+
+  return {
+    draftTitle,
+    draftBody,
+    suggestions: [
+      "Add one concrete timeline (e.g., decision needed in 30 days).",
+      "Include your best and worst-case outcomes in one sentence each.",
+      "Mention what you already tried so replies are more specific.",
+    ],
+    provider: "mock",
+  };
+}
+
+async function tryOpenAiAdviceAssist({ title, question, targetTone }) {
+  if (AI_ASSIST_MODE !== "openai" || !OPENAI_API_KEY) {
+    return null;
+  }
+
+  const toneHint =
+    targetTone === "direct"
+      ? "direct and concise"
+      : targetTone === "empathetic"
+        ? "empathetic and practical"
+        : "balanced and practical";
+
+  const userPrompt = [
+    "Rewrite the following TellNab advice thread draft.",
+    `Desired tone: ${toneHint}.`,
+    "Return strict JSON with keys: draftTitle (string), draftBody (string), suggestions (string[]).",
+    `Existing title: ${normalizeText(title, 140) || "(none)"}`,
+    `Question/body: ${normalizeText(question, 2600)}`,
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You rewrite user-generated advice posts. Keep the intent unchanged. Avoid harmful language and return only JSON.",
+        },
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = await response.json();
+  const raw = payload?.choices?.[0]?.message?.content;
+  if (!raw) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const draftTitle = normalizeText(parsed?.draftTitle || title, 120);
+  const draftBody = normalizeText(parsed?.draftBody || question, 2600);
+  const suggestions = Array.isArray(parsed?.suggestions)
+    ? parsed.suggestions
+        .map((item) => normalizeText(item, 140))
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
+
+  if (!draftBody) {
+    return null;
+  }
+
+  return {
+    draftTitle: draftTitle || buildTitleFromQuestion(draftBody),
+    draftBody,
+    suggestions,
+    provider: "openai",
+  };
+}
+
+async function buildAiAdviceAssistResult(payload) {
+  const openAiResult = await tryOpenAiAdviceAssist(payload);
+  if (openAiResult) return openAiResult;
+  return buildMockAdviceAssist(payload);
+}
+
+async function callOpenAiJson(systemPrompt, userPrompt) {
+  if (AI_ASSIST_MODE !== "openai" || !OPENAI_API_KEY) {
+    return null;
+  }
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.3,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = await response.json();
+  const raw = payload?.choices?.[0]?.message?.content;
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function buildMockCommentAssist({ draft, parentComment, targetTone }) {
+  const toneLead =
+    targetTone === "direct"
+      ? "Short direct response:"
+      : targetTone === "empathetic"
+        ? "Supportive response:"
+        : "Balanced response:";
+
+  const opening = parentComment
+    ? `I understand your point about "${normalizeText(parentComment, 80)}".`
+    : "Thanks for sharing this context.";
+
+  return {
+    draftComment: `${toneLead} ${opening} ${normalizeText(draft || "", 500)} ${
+      targetTone === "direct"
+        ? "Given your constraints, I would prioritize the lowest-risk next step this week."
+        : "A practical next step is to test one small option before a full commitment."
+    }`.trim(),
+    suggestions: [
+      "Reference one concrete detail from the original thread.",
+      "Suggest an immediate next step, not just a long-term idea.",
+      "Keep tone respectful while being specific.",
+    ],
+    provider: "mock",
+  };
+}
+
+async function tryOpenAiCommentAssist({ adviceTitle, adviceBody, parentComment, draft, targetTone }) {
+  const toneHint =
+    targetTone === "direct"
+      ? "direct and concise"
+      : targetTone === "empathetic"
+        ? "empathetic and practical"
+        : "balanced and practical";
+
+  const parsed = await callOpenAiJson(
+    "You improve draft comments for online advice threads. Keep it civil and practical. Return JSON only.",
+    [
+      "Improve this comment draft for an advice thread.",
+      `Tone: ${toneHint}.`,
+      "Return JSON with keys: draftComment (string), suggestions (string[]).",
+      `Thread title: ${normalizeText(adviceTitle, 140)}`,
+      `Thread body: ${normalizeText(adviceBody, 1200)}`,
+      `Parent comment: ${normalizeText(parentComment || "", 400) || "(none)"}`,
+      `Current draft: ${normalizeText(draft || "", 900)}`,
+    ].join("\n"),
+  );
+
+  if (!parsed) return null;
+
+  const draftComment = normalizeText(parsed?.draftComment || draft, 1200);
+  if (!draftComment) return null;
+
+  return {
+    draftComment,
+    suggestions: Array.isArray(parsed?.suggestions)
+      ? parsed.suggestions.map((item) => normalizeText(item, 140)).filter(Boolean).slice(0, 4)
+      : [],
+    provider: "openai",
+  };
+}
+
+async function buildAiCommentAssistResult(payload) {
+  const openAiResult = await tryOpenAiCommentAssist(payload);
+  if (openAiResult) return openAiResult;
+  return buildMockCommentAssist(payload);
+}
+
+function buildMockModerationHint({ body, status, isLocked, isSpam }) {
+  if (isSpam) {
+    return {
+      recommendedAction: "REMOVED",
+      priority: "HIGH",
+      rationale: "Thread is currently flagged as spam and should receive higher-priority review.",
+      checks: [
+        "Verify spam indicators across title/body and posting pattern.",
+        "Confirm moderation history aligns with spam classification.",
+        "If misclassified, clear spam flag and document reason.",
+      ],
+      provider: "mock",
+    };
+  }
+
+  const riskyTerms = /(scam|hate|violence|abuse|illegal|self-harm|kill)/i.test(body);
+  if (riskyTerms) {
+    return {
+      recommendedAction: "HOLD",
+      priority: "HIGH",
+      rationale: "Potentially sensitive language detected. Human review recommended before publish.",
+      checks: [
+        "Verify whether harmful intent is explicit or contextual.",
+        "Request clarifying context from author if ambiguous.",
+        "Apply policy-consistent hold note for auditability.",
+      ],
+      provider: "mock",
+    };
+  }
+
+  if (status === "PENDING") {
+    return {
+      recommendedAction: "APPROVED",
+      priority: "MEDIUM",
+      rationale: "No immediate high-risk terms detected in quick triage scan.",
+      checks: [
+        "Confirm respectful wording and no targeted abuse.",
+        "Ensure enough context exists for useful replies.",
+        `Thread lock currently ${isLocked ? "enabled" : "disabled"}; verify intended state.`,
+      ],
+      provider: "mock",
+    };
+  }
+
+  return {
+    recommendedAction: "KEEP_STATUS",
+    priority: "LOW",
+    rationale: "Current status appears consistent with quick triage checks.",
+    checks: [
+      "Review recent moderator actions for consistency.",
+      "Check if new reports/comments require status change.",
+    ],
+    provider: "mock",
+  };
+}
+
+async function tryOpenAiModerationHint({ title, body, status, isLocked, isFeatured, isSpam }) {
+  const parsed = await callOpenAiJson(
+    "You produce moderation triage hints. Do not make final policy claims. Return JSON only.",
+    [
+      "Generate triage hint for a moderation queue item.",
+      "Return JSON with keys: recommendedAction, priority, rationale, checks.",
+      "recommendedAction must be one of APPROVED, HOLD, REMOVED, KEEP_STATUS.",
+      "priority must be one of LOW, MEDIUM, HIGH.",
+      `Title: ${normalizeText(title, 160)}`,
+      `Body: ${normalizeText(body, 1600)}`,
+      `Current status: ${status}`,
+      `Locked: ${String(isLocked)}, Featured: ${String(isFeatured)}, Spam: ${String(isSpam)}`,
+    ].join("\n"),
+  );
+
+  if (!parsed) return null;
+
+  const recommendedAction = ["APPROVED", "HOLD", "REMOVED", "KEEP_STATUS"].includes(
+    String(parsed?.recommendedAction || ""),
+  )
+    ? parsed.recommendedAction
+    : null;
+
+  const priority = ["LOW", "MEDIUM", "HIGH"].includes(String(parsed?.priority || ""))
+    ? parsed.priority
+    : null;
+
+  const rationale = normalizeText(parsed?.rationale || "", 320);
+  if (!recommendedAction || !priority || !rationale) return null;
+
+  return {
+    recommendedAction,
+    priority,
+    rationale,
+    checks: Array.isArray(parsed?.checks)
+      ? parsed.checks.map((item) => normalizeText(item, 160)).filter(Boolean).slice(0, 4)
+      : [],
+    provider: "openai",
+  };
+}
+
+async function buildAiModerationHintResult(payload) {
+  const openAiResult = await tryOpenAiModerationHint(payload);
+  if (openAiResult) return openAiResult;
+  return buildMockModerationHint(payload);
+}
+
 function canUserModerateGroup(group, user) {
   if (!user) return false;
   if (group.ownerId === user.id) return true;
@@ -576,6 +1019,78 @@ function slugify(value) {
     .slice(0, 70);
 }
 
+function isValidProfileImageValue(value) {
+  if (!value) return true;
+  if (value.startsWith("http://") || value.startsWith("https://")) return true;
+  if (value.startsWith("data:image/")) return true;
+  return false;
+}
+
+function normalizeOptionalText(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function socialFallbackName(provider) {
+  if (provider === SOCIAL_AUTH_PROVIDER.APPLE) {
+    return "Apple Member";
+  }
+  return "Google Member";
+}
+
+function socialPlaceholderEmail(provider, providerSubject) {
+  const domain = provider === SOCIAL_AUTH_PROVIDER.APPLE ? "apple" : "google";
+  return `${providerSubject.toLowerCase()}@${domain}.tellnab.social`;
+}
+
+async function buildProfilePayload(userId) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return null;
+  }
+
+  const [asks, replies, featuredThreads, approvedThreads, pendingThreads, badgeCount] = await Promise.all([
+    prisma.advice.count({ where: { authorId: userId } }),
+    prisma.adviceComment.count({ where: { authorId: userId } }),
+    prisma.advice.count({ where: { authorId: userId, isFeatured: true } }),
+    prisma.advice.count({ where: { authorId: userId, status: ADVICE_STATUS.APPROVED } }),
+    prisma.advice.count({ where: { authorId: userId, status: ADVICE_STATUS.PENDING } }),
+    prisma.userBadge.count({ where: { userId, isVisible: true } }),
+  ]);
+
+  const roleLabel =
+    user.role === ROLES.ADMIN
+      ? "Admin"
+      : user.role === ROLES.MODERATOR
+        ? "Moderator"
+        : "Member";
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    authProvider: user.authProvider || "LOCAL",
+    hasPassword: user.hasPassword !== false,
+    bio:
+      user.bio || `${roleLabel} at TellNab • helping people make clear decisions with direct advice.`,
+    avatarUrl: user.avatarUrl || null,
+    coverImageUrl: user.coverImageUrl || null,
+    memberSince: user.createdAt,
+    asks,
+    replies,
+    featuredThreads,
+    approvedThreads,
+    pendingThreads,
+    wallet: {
+      paidCents: user.walletPaidCents,
+      earnedCents: user.walletEarnedCents,
+      lifetimeEarnedCents: user.walletLifetimeEarnedCents,
+    },
+    badgesCount: badgeCount,
+  };
+}
+
 const registerSchema = z.object({
   email: z.string().email().max(150),
   name: z.string().min(2).max(60),
@@ -592,6 +1107,38 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.string().email().max(150),
   password: z.string().min(8).max(128),
+});
+
+const socialAuthSchema = z.object({
+  provider: z.enum(["google", "apple"]),
+  providerSubject: z.string().min(6).max(120).optional(),
+  email: z.string().email().max(150).optional(),
+  name: z.string().min(2).max(80).optional(),
+  avatarUrl: z.string().max(5000).optional(),
+});
+
+const profileUpdateSchema = z
+  .object({
+    name: z.string().min(2).max(80).optional(),
+    email: z.string().email().max(150).optional(),
+    bio: z.string().max(240).optional(),
+    avatarUrl: z.string().max(5000).nullable().optional(),
+    coverImageUrl: z.string().max(5000).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one profile field is required",
+  });
+
+const profilePasswordUpdateSchema = z.object({
+  currentPassword: z.string().min(8).max(128).optional(),
+  newPassword: z
+    .string()
+    .min(12)
+    .max(128)
+    .regex(/[A-Z]/, "Password must include an uppercase letter")
+    .regex(/[a-z]/, "Password must include a lowercase letter")
+    .regex(/[0-9]/, "Password must include a number")
+    .regex(/[^A-Za-z0-9]/, "Password must include a symbol"),
 });
 
 const roleUpdateSchema = z.object({
@@ -632,8 +1179,9 @@ const adviceFlagsSchema = z
   .object({
     isLocked: z.boolean().optional(),
     isFeatured: z.boolean().optional(),
+    isSpam: z.boolean().optional(),
   })
-  .refine((v) => v.isLocked !== undefined || v.isFeatured !== undefined, {
+  .refine((v) => v.isLocked !== undefined || v.isFeatured !== undefined || v.isSpam !== undefined, {
     message: "At least one flag is required",
   });
 
@@ -663,6 +1211,31 @@ const notificationReadSchema = z.object({
 });
 
 const createBoostCheckoutSchema = z.object({});
+
+const aiAdviceAssistSchema = z.object({
+  title: z.string().max(140).optional().default(""),
+  question: z.string().min(20).max(5000),
+  targetTone: z.enum(["balanced", "direct", "empathetic"]).optional().default("balanced"),
+  outcome: z.string().max(180).optional(),
+  anonymous: z.boolean().optional(),
+});
+
+const aiCommentAssistSchema = z.object({
+  adviceTitle: z.string().min(2).max(160),
+  adviceBody: z.string().min(10).max(5000),
+  parentComment: z.string().max(1000).optional(),
+  draft: z.string().max(1500).optional().default(""),
+  targetTone: z.enum(["balanced", "direct", "empathetic"]).optional().default("balanced"),
+});
+
+const aiModerationHintSchema = z.object({
+  title: z.string().min(2).max(160),
+  body: z.string().min(10).max(5000),
+  status: z.enum([ADVICE_STATUS.PENDING, ADVICE_STATUS.APPROVED, ADVICE_STATUS.HOLD, ADVICE_STATUS.REMOVED]),
+  isLocked: z.boolean(),
+  isFeatured: z.boolean(),
+  isSpam: z.boolean(),
+});
 
 const walletTopupSchema = z.object({
   amountCents: z.number().int().min(100).max(WALLET_TOPUP_MAX_CENTS),
@@ -746,6 +1319,8 @@ app.post("/api/auth/register", async (req, res) => {
         email: data.email.toLowerCase(),
         name: data.name,
         passwordHash,
+        hasPassword: true,
+        authProvider: "LOCAL",
         role: ROLES.MEMBER,
         isActive: true,
       },
@@ -781,6 +1356,10 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(403).json({ message: "Account suspended" });
     }
 
+    if (user.hasPassword === false) {
+      return res.status(400).json({ message: "This account uses social sign-in. Use Google or Apple login." });
+    }
+
     const ok = await bcrypt.compare(data.password, user.passwordHash);
     if (!ok) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -800,6 +1379,89 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
     return res.status(500).json({ message: "Login failed" });
+  }
+});
+
+app.post("/api/auth/social", async (req, res) => {
+  try {
+    const data = socialAuthSchema.parse(req.body);
+    const provider = data.provider === "apple" ? SOCIAL_AUTH_PROVIDER.APPLE : SOCIAL_AUTH_PROVIDER.GOOGLE;
+    const providerSubject = (data.providerSubject || data.email || `social-${Date.now()}`).toLowerCase();
+    const providerField = provider === SOCIAL_AUTH_PROVIDER.APPLE ? "appleSub" : "googleSub";
+
+    let user = await prisma.user.findFirst({
+      where: {
+        [providerField]: providerSubject,
+      },
+    });
+
+    if (!user && data.email) {
+      user = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
+    }
+
+    const safeAvatar = normalizeOptionalText(data.avatarUrl || "");
+    if (safeAvatar && !isValidProfileImageValue(safeAvatar)) {
+      return res.status(400).json({ message: "Invalid avatar image URL" });
+    }
+
+    if (!user) {
+      const randomPassword = await bcrypt.hash(`${provider}:${providerSubject}:${Date.now()}`, 12);
+      const createData = {
+        email: (data.email || socialPlaceholderEmail(provider, providerSubject)).toLowerCase(),
+        name: data.name || socialFallbackName(provider),
+        passwordHash: randomPassword,
+        hasPassword: false,
+        authProvider: provider,
+        avatarUrl: safeAvatar,
+        role: ROLES.MEMBER,
+        isActive: true,
+        [providerField]: providerSubject,
+      };
+
+      user = await prisma.user.create({ data: createData });
+    } else {
+      if (!user.isActive) {
+        return res.status(403).json({ message: "Account suspended" });
+      }
+
+      const updateData = {
+        authProvider: provider,
+      };
+
+      if (!user[providerField]) {
+        updateData[providerField] = providerSubject;
+      }
+
+      if (safeAvatar && !user.avatarUrl) {
+        updateData.avatarUrl = safeAvatar;
+      }
+
+      if (data.name && user.name !== data.name) {
+        updateData.name = data.name;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: updateData,
+        });
+      }
+    }
+
+    const token = createToken(user);
+    res.cookie("tn_auth", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 12,
+    });
+
+    return res.json({ user: sanitizeUser(user), token });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Social login failed" });
   }
 });
 
@@ -849,44 +1511,106 @@ app.get("/api/users/search", authRequired, async (req, res) => {
 
 app.get("/api/profile", authRequired, async (req, res) => {
   try {
-    const [asks, replies, featuredThreads, approvedThreads, pendingThreads, badgeCount] = await Promise.all([
-      prisma.advice.count({ where: { authorId: req.user.id } }),
-      prisma.adviceComment.count({ where: { authorId: req.user.id } }),
-      prisma.advice.count({ where: { authorId: req.user.id, isFeatured: true } }),
-      prisma.advice.count({ where: { authorId: req.user.id, status: ADVICE_STATUS.APPROVED } }),
-      prisma.advice.count({ where: { authorId: req.user.id, status: ADVICE_STATUS.PENDING } }),
-      prisma.userBadge.count({ where: { userId: req.user.id, isVisible: true } }),
-    ]);
-
-    const roleLabel =
-      req.user.role === ROLES.ADMIN
-        ? "Admin"
-        : req.user.role === ROLES.MODERATOR
-          ? "Moderator"
-          : "Member";
-
-    return res.json({
-      profile: {
-        id: req.user.id,
-        name: req.user.name,
-        role: req.user.role,
-        bio: `${roleLabel} at TellNab • helping people make clear decisions with direct advice.`,
-        memberSince: req.user.createdAt,
-        asks,
-        replies,
-        featuredThreads,
-        approvedThreads,
-        pendingThreads,
-        wallet: {
-          paidCents: req.user.walletPaidCents,
-          earnedCents: req.user.walletEarnedCents,
-          lifetimeEarnedCents: req.user.walletLifetimeEarnedCents,
-        },
-        badgesCount: badgeCount,
-      },
-    });
+    const profile = await buildProfilePayload(req.user.id);
+    if (!profile) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    return res.json({ profile });
   } catch {
     return res.status(500).json({ message: "Failed to load profile" });
+  }
+});
+
+app.patch("/api/profile", authRequired, async (req, res) => {
+  try {
+    const data = profileUpdateSchema.parse(req.body);
+    const updateData = {};
+
+    if (data.name !== undefined) {
+      updateData.name = data.name.trim();
+    }
+
+    if (data.email !== undefined) {
+      const nextEmail = data.email.trim().toLowerCase();
+      const existing = await prisma.user.findUnique({ where: { email: nextEmail } });
+      if (existing && existing.id !== req.user.id) {
+        return res.status(409).json({ message: "Email already in use" });
+      }
+      updateData.email = nextEmail;
+    }
+
+    if (data.bio !== undefined) {
+      updateData.bio = data.bio.trim();
+    }
+
+    if (data.avatarUrl !== undefined) {
+      const avatarUrl = normalizeOptionalText(data.avatarUrl || "");
+      if (avatarUrl && !isValidProfileImageValue(avatarUrl)) {
+        return res.status(400).json({ message: "Invalid avatar image URL" });
+      }
+      updateData.avatarUrl = avatarUrl;
+    }
+
+    if (data.coverImageUrl !== undefined) {
+      const coverImageUrl = normalizeOptionalText(data.coverImageUrl || "");
+      if (coverImageUrl && !isValidProfileImageValue(coverImageUrl)) {
+        return res.status(400).json({ message: "Invalid cover image URL" });
+      }
+      updateData.coverImageUrl = coverImageUrl;
+    }
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: updateData,
+    });
+
+    const profile = await buildProfilePayload(req.user.id);
+    return res.json({ profile, message: "Profile updated." });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to update profile" });
+  }
+});
+
+app.patch("/api/profile/password", authRequired, async (req, res) => {
+  try {
+    const data = profilePasswordUpdateSchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.hasPassword) {
+      if (!data.currentPassword) {
+        return res.status(400).json({ message: "Current password is required" });
+      }
+      const isValid = await bcrypt.compare(data.currentPassword, user.passwordHash);
+      if (!isValid) {
+        return res.status(401).json({ message: "Current password is incorrect" });
+      }
+    }
+
+    if (data.currentPassword && data.currentPassword === data.newPassword) {
+      return res.status(400).json({ message: "New password must be different" });
+    }
+
+    const nextHash = await bcrypt.hash(data.newPassword, 12);
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        passwordHash: nextHash,
+        hasPassword: true,
+      },
+    });
+
+    return res.json({ success: true, message: "Password updated." });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to update password" });
   }
 });
 
@@ -1785,19 +2509,122 @@ app.get("/api/moderation/activity", authRequired, moderatorOrAdminRequired, asyn
 
     return res.json({ actions: combined });
   } catch {
-    return res.status(500).json({ message: "Failed to load moderation activity" });
+    return sendError(res, {
+      status: 500,
+      code: "MODERATION_ACTIVITY_LOAD_FAILED",
+      message: "Failed to load moderation activity",
+    });
+  }
+});
+
+app.post("/api/ai/advice-assist", authRequired, async (req, res) => {
+  try {
+    const data = aiAdviceAssistSchema.parse(req.body || {});
+
+    const result = await buildAiAdviceAssistResult({
+      title: data.title,
+      question: data.question,
+      targetTone: data.targetTone,
+      outcome: data.outcome,
+      anonymous: data.anonymous,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
+    }
+
+    return sendError(res, {
+      status: 500,
+      code: "AI_ASSIST_FAILED",
+      message: "Failed to generate AI draft",
+    });
+  }
+});
+
+app.post("/api/ai/comment-assist", authRequired, async (req, res) => {
+  try {
+    const data = aiCommentAssistSchema.parse(req.body || {});
+
+    const result = await buildAiCommentAssistResult({
+      adviceTitle: data.adviceTitle,
+      adviceBody: data.adviceBody,
+      parentComment: data.parentComment,
+      draft: data.draft,
+      targetTone: data.targetTone,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
+    }
+
+    return sendError(res, {
+      status: 500,
+      code: "AI_COMMENT_ASSIST_FAILED",
+      message: "Failed to generate AI comment draft",
+    });
+  }
+});
+
+app.post("/api/ai/moderation-hint", authRequired, moderatorOrAdminRequired, async (req, res) => {
+  try {
+    const data = aiModerationHintSchema.parse(req.body || {});
+
+    const result = await buildAiModerationHintResult({
+      title: data.title,
+      body: data.body,
+      status: data.status,
+      isLocked: data.isLocked,
+      isFeatured: data.isFeatured,
+      isSpam: data.isSpam,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
+    }
+
+    return sendError(res, {
+      status: 500,
+      code: "AI_MODERATION_HINT_FAILED",
+      message: "Failed to generate moderation hint",
+    });
   }
 });
 
 app.post("/api/advice", authRequired, async (req, res) => {
   try {
     const data = createAdviceSchema.parse(req.body);
+    const autoSpamFlag = isLikelySpamTitle(data.title);
 
     let resolvedCategoryId = data.categoryId || null;
     if (resolvedCategoryId) {
       const category = await prisma.category.findUnique({ where: { id: resolvedCategoryId } });
       if (!category || !category.isActive) {
-        return res.status(400).json({ message: "Invalid category" });
+        return sendError(res, {
+          status: 400,
+          code: "INVALID_CATEGORY",
+          message: "Invalid category",
+        });
       }
     } else {
       resolvedCategoryId = await resolveDefaultCategoryId();
@@ -1816,7 +2643,11 @@ app.post("/api/advice", authRequired, async (req, res) => {
       });
 
       if (!membership || !membership.group.isActive) {
-        return res.status(403).json({ message: "You must be a group member to post inside this group" });
+        return sendError(res, {
+          status: 403,
+          code: "GROUP_POST_FORBIDDEN",
+          message: "You must be a group member to post inside this group",
+        });
       }
     }
 
@@ -1825,6 +2656,7 @@ app.post("/api/advice", authRequired, async (req, res) => {
         title: data.title,
         body: data.body,
         status: ADVICE_STATUS.PENDING,
+        isSpam: autoSpamFlag,
         authorId: req.user.id,
         categoryId: resolvedCategoryId,
         groupId: resolvedGroupId,
@@ -1841,9 +2673,18 @@ app.post("/api/advice", authRequired, async (req, res) => {
     return res.status(201).json({ advice: sanitizeAdvice(advice) });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
     }
-    return res.status(500).json({ message: "Failed to create advice" });
+    return sendError(res, {
+      status: 500,
+      code: "ADVICE_CREATE_FAILED",
+      message: "Failed to create advice",
+    });
   }
 });
 
@@ -1917,7 +2758,11 @@ app.post("/api/advice/:id/follow", authRequired, async (req, res) => {
   const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
 
   if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
-    return res.status(404).json({ message: "Advice not found" });
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
   }
 
   await prisma.adviceFollow.upsert({
@@ -1953,7 +2798,11 @@ app.get("/api/advice/:id/boost/status", async (req, res) => {
 
   const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
   if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
-    return res.status(404).json({ message: "Advice not found" });
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
   }
 
   return res.json({
@@ -1974,23 +2823,43 @@ app.post("/api/advice/:id/boost/checkout", authRequired, async (req, res) => {
     });
 
     if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
-      return res.status(404).json({ message: "Advice not found" });
+      return sendError(res, {
+        status: 404,
+        code: "ADVICE_NOT_FOUND",
+        message: "Advice not found",
+      });
     }
 
     if (advice.authorId !== req.user.id) {
-      return res.status(403).json({ message: "Only the thread owner can boost this thread" });
+      return sendError(res, {
+        status: 403,
+        code: "BOOST_FORBIDDEN",
+        message: "Only the thread owner can boost this thread",
+      });
     }
 
     if (advice.isLocked) {
-      return res.status(400).json({ message: "Locked threads cannot be boosted" });
+      return sendError(res, {
+        status: 400,
+        code: "ADVICE_LOCKED",
+        message: "Locked threads cannot be boosted",
+      });
     }
 
     if (advice.isBoostActive) {
-      return res.status(409).json({ message: "Thread already has an active boost" });
+      return sendError(res, {
+        status: 409,
+        code: "BOOST_ALREADY_ACTIVE",
+        message: "Thread already has an active boost",
+      });
     }
 
     if (BOOST_PAYMENT_MODE !== "mock") {
-      return res.status(503).json({ message: "Payment provider is not configured yet" });
+      return sendError(res, {
+        status: 503,
+        code: "BOOST_PROVIDER_UNAVAILABLE",
+        message: "Payment provider is not configured yet",
+      });
     }
 
     const priceCents = getBoostPriceCents();
@@ -2040,9 +2909,18 @@ app.post("/api/advice/:id/boost/checkout", authRequired, async (req, res) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
     }
-    return res.status(500).json({ message: "Failed to create boost checkout" });
+    return sendError(res, {
+      status: 500,
+      code: "BOOST_CHECKOUT_FAILED",
+      message: "Failed to create boost checkout",
+    });
   }
 });
 
@@ -2065,7 +2943,11 @@ app.get("/api/advice/:id", async (req, res) => {
   });
 
   if (!advice) {
-    return res.status(404).json({ message: "Advice not found" });
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
   }
 
   const canAccessUnpublished = Boolean(
@@ -2073,7 +2955,11 @@ app.get("/api/advice/:id", async (req, res) => {
   );
 
   if (advice.status !== ADVICE_STATUS.APPROVED && !canAccessUnpublished) {
-    return res.status(403).json({ message: "Advice not publicly available" });
+    return sendError(res, {
+      status: 403,
+      code: "ADVICE_NOT_PUBLIC",
+      message: "Advice not publicly available",
+    });
   }
 
   const followCount = await prisma.adviceFollow.count({ where: { adviceId: advice.id } });
@@ -2109,11 +2995,19 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
     const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
 
     if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
-      return res.status(404).json({ message: "Advice not available for comments" });
+      return sendError(res, {
+        status: 404,
+        code: "ADVICE_COMMENTING_UNAVAILABLE",
+        message: "Advice not available for comments",
+      });
     }
 
     if (advice.isLocked && req.user.role === ROLES.MEMBER) {
-      return res.status(403).json({ message: "Comments are locked by moderators" });
+      return sendError(res, {
+        status: 403,
+        code: "COMMENTS_LOCKED",
+        message: "Comments are locked by moderators",
+      });
     }
 
     const comment = await prisma.adviceComment.create({
@@ -2164,9 +3058,18 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
     }
-    return res.status(500).json({ message: "Failed to add comment" });
+    return sendError(res, {
+      status: 500,
+      code: "COMMENT_CREATE_FAILED",
+      message: "Failed to add comment",
+    });
   }
 });
 
@@ -2174,7 +3077,11 @@ app.delete("/api/advice/:adviceId/comments/:commentId", authRequired, async (req
   try {
     const advice = await prisma.advice.findUnique({ where: { id: req.params.adviceId } });
     if (!advice) {
-      return res.status(404).json({ message: "Advice not found" });
+      return sendError(res, {
+        status: 404,
+        code: "ADVICE_NOT_FOUND",
+        message: "Advice not found",
+      });
     }
 
     const rootComment = await prisma.adviceComment.findUnique({
@@ -2182,11 +3089,19 @@ app.delete("/api/advice/:adviceId/comments/:commentId", authRequired, async (req
     });
 
     if (!rootComment || rootComment.adviceId !== advice.id) {
-      return res.status(404).json({ message: "Comment not found" });
+      return sendError(res, {
+        status: 404,
+        code: "COMMENT_NOT_FOUND",
+        message: "Comment not found",
+      });
     }
 
     if (rootComment.authorId !== req.user.id) {
-      return res.status(403).json({ message: "You can only delete your own comment" });
+      return sendError(res, {
+        status: 403,
+        code: "COMMENT_DELETE_FORBIDDEN",
+        message: "You can only delete your own comment",
+      });
     }
 
     const idsToDelete = [rootComment.id];
@@ -2233,7 +3148,11 @@ app.delete("/api/advice/:adviceId/comments/:commentId", authRequired, async (req
       removedCount: idsToDelete.length,
     });
   } catch {
-    return res.status(500).json({ message: "Failed to remove comment" });
+    return sendError(res, {
+      status: 500,
+      code: "COMMENT_DELETE_FAILED",
+      message: "Failed to remove comment",
+    });
   }
 });
 
@@ -2294,9 +3213,25 @@ app.patch("/api/moderation/advice/:id", authRequired, moderatorOrAdminRequired, 
     return res.json({ advice: sanitizeAdvice(advice) });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
     }
-    return res.status(404).json({ message: "Advice not found" });
+    if (isPrismaNotFoundError(error)) {
+      return sendError(res, {
+        status: 404,
+        code: "ADVICE_NOT_FOUND",
+        message: "Advice not found",
+      });
+    }
+    return sendError(res, {
+      status: 500,
+      code: "ADVICE_MODERATION_UPDATE_FAILED",
+      message: "Failed to update moderation status",
+    });
   }
 });
 
@@ -2309,6 +3244,7 @@ app.patch("/api/moderation/advice/:id/flags", authRequired, moderatorOrAdminRequ
       data: {
         ...(data.isLocked !== undefined ? { isLocked: data.isLocked } : {}),
         ...(data.isFeatured !== undefined ? { isFeatured: data.isFeatured } : {}),
+        ...(data.isSpam !== undefined ? { isSpam: data.isSpam } : {}),
         ...(data.isLocked === true
           ? {
               isBoostActive: false,
@@ -2327,7 +3263,7 @@ app.patch("/api/moderation/advice/:id/flags", authRequired, moderatorOrAdminRequ
         adviceId: advice.id,
         moderatorId: req.user.id,
         action: "FLAGS_UPDATED",
-        note: `locked=${String(advice.isLocked)}, featured=${String(advice.isFeatured)}`,
+        note: `locked=${String(advice.isLocked)}, featured=${String(advice.isFeatured)}, spam=${String(advice.isSpam)}`,
       },
     });
 
@@ -2336,7 +3272,7 @@ app.patch("/api/moderation/advice/:id/flags", authRequired, moderatorOrAdminRequ
         userId: advice.authorId,
         type: NOTIFICATION_TYPES.MODERATION,
         title: "Advice moderation flags updated",
-        body: `Thread flags changed: locked=${String(advice.isLocked)}, featured=${String(advice.isFeatured)}.`,
+        body: `Thread flags changed: locked=${String(advice.isLocked)}, featured=${String(advice.isFeatured)}, spam=${String(advice.isSpam)}.`,
         adviceId: advice.id,
       });
     }
@@ -2344,9 +3280,25 @@ app.patch("/api/moderation/advice/:id/flags", authRequired, moderatorOrAdminRequ
     return res.json({ advice: sanitizeAdvice(advice) });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      return sendError(res, {
+        status: 400,
+        code: "VALIDATION_ERROR",
+        message: "Invalid input",
+        details: error.issues,
+      });
     }
-    return res.status(404).json({ message: "Advice not found" });
+    if (isPrismaNotFoundError(error)) {
+      return sendError(res, {
+        status: 404,
+        code: "ADVICE_NOT_FOUND",
+        message: "Advice not found",
+      });
+    }
+    return sendError(res, {
+      status: 500,
+      code: "ADVICE_FLAGS_UPDATE_FAILED",
+      message: "Failed to update moderation flags",
+    });
   }
 });
 
@@ -2360,7 +3312,11 @@ app.delete(
 
       const advice = await prisma.advice.findUnique({ where: { id: req.params.adviceId } });
       if (!advice) {
-        return res.status(404).json({ message: "Advice not found" });
+        return sendError(res, {
+          status: 404,
+          code: "ADVICE_NOT_FOUND",
+          message: "Advice not found",
+        });
       }
 
       const rootComment = await prisma.adviceComment.findUnique({
@@ -2373,7 +3329,11 @@ app.delete(
       });
 
       if (!rootComment || rootComment.adviceId !== advice.id) {
-        return res.status(404).json({ message: "Comment not found" });
+        return sendError(res, {
+          status: 404,
+          code: "COMMENT_NOT_FOUND",
+          message: "Comment not found",
+        });
       }
 
       const idsToDelete = [rootComment.id];
@@ -2440,9 +3400,18 @@ app.delete(
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid input", issues: error.issues });
+        return sendError(res, {
+          status: 400,
+          code: "VALIDATION_ERROR",
+          message: "Invalid input",
+          details: error.issues,
+        });
       }
-      return res.status(500).json({ message: "Failed to remove comment" });
+      return sendError(res, {
+        status: 500,
+        code: "MODERATION_COMMENT_DELETE_FAILED",
+        message: "Failed to remove comment",
+      });
     }
   },
 );

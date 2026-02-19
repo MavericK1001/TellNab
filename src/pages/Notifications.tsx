@@ -53,12 +53,14 @@ export default function Notifications() {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        title="Notifications"
-        subtitle="Replies, moderation updates, and activity from threads you care about."
-      />
+      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
+        <SectionTitle
+          title="Notifications"
+          subtitle="Replies, moderation updates, and activity from threads you care about."
+        />
+      </div>
 
-      <Card>
+      <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-slate-300">
             Unread notifications:{" "}
@@ -67,14 +69,14 @@ export default function Notifications() {
           <button
             type="button"
             onClick={() => void onMarkAllRead()}
-            className="rounded-lg border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
+            className="rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
           >
             Mark all read
           </button>
         </div>
       </Card>
 
-      <Card>
+      <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
         {loading ? (
           <p className="text-slate-300">Loading notifications…</p>
         ) : null}
@@ -105,7 +107,7 @@ export default function Notifications() {
                   <button
                     type="button"
                     onClick={() => void onMarkRead(item)}
-                    className="rounded-lg border border-white/15 px-2 py-1 text-[11px] font-semibold text-slate-200 transition hover:bg-white/10"
+                    className="rounded-xl border border-white/15 px-2 py-1 text-[11px] font-semibold text-slate-200 transition hover:bg-white/10"
                   >
                     {item.isRead ? "Mark unread" : "Mark read"}
                   </button>

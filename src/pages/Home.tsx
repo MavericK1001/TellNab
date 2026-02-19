@@ -299,7 +299,7 @@ export default function Home() {
     <div className="space-y-8">
       <section
         data-reveal
-        className="reveal-block overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-8 shadow-2xl shadow-violet-900/20 sm:p-10"
+        className="reveal-block overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-violet-500/12 via-slate-900 to-cyan-500/10 p-8 shadow-2xl shadow-violet-900/20 sm:p-10"
       >
         <div className="grid items-start gap-8 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-5">
@@ -334,7 +334,7 @@ export default function Home() {
             </div>
           </div>
 
-          <Card className="p-5 home-float-soft">
+          <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65 p-5 home-float-soft">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
               Dashboard pulse
             </p>

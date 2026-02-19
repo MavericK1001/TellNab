@@ -12,6 +12,13 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
+  hasPassword  Boolean  @default(true)
+  bio          String?
+  avatarUrl    String?
+  coverImageUrl String?
+  authProvider String   @default("LOCAL")
+  googleSub    String?  @unique
+  appleSub     String?  @unique
   role         String   @default("MEMBER")
   isActive     Boolean  @default(true)
   walletPaidCents Int   @default(0)
@@ -63,6 +70,7 @@ model Advice {
   status        String   @default("PENDING")
   isLocked      Boolean  @default(false)
   isFeatured    Boolean  @default(false)
+  isSpam        Boolean  @default(false)
   isBoostActive Boolean  @default(false)
   boostActivatedAt DateTime?
   boostExpiresAt DateTime?

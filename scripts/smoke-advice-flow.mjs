@@ -2,6 +2,12 @@ import { spawn } from "node:child_process";
 
 const BASE_URL = "http://127.0.0.1:4000";
 const SERVER_START_TIMEOUT_MS = 15000;
+const ADMIN_EMAIL = process.env.ADMIN_SEED_EMAIL || "admin@tellnab.local";
+const ADMIN_PASSWORD_CANDIDATES = [
+  process.env.ADMIN_SEED_PASSWORD,
+  "M@v99N@b!123",
+  "ChangeMeNow!123",
+].filter(Boolean);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,19 +54,48 @@ function logFailure(step, response) {
   console.error(`${step}_FAIL`, response.status, JSON.stringify(response.json));
 }
 
+async function loginAsAdmin() {
+  for (const password of ADMIN_PASSWORD_CANDIDATES) {
+    const response = await req("/api/auth/login", {
+      method: "POST",
+      body: {
+        email: ADMIN_EMAIL,
+        password,
+      },
+    });
+
+    if (response.ok) {
+      return response;
+    }
+  }
+
+  return req("/api/auth/login", {
+    method: "POST",
+    body: {
+      email: ADMIN_EMAIL,
+      password: ADMIN_PASSWORD_CANDIDATES[0],
+    },
+  });
+}
+
 async function runSmoke() {
-  const server = spawn("npm", ["run", "dev:server"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-  });
+  let server = null;
 
-  server.stdout.on("data", (chunk) => {
-    process.stdout.write(String(chunk));
-  });
+  const healthyBeforeStart = await waitForHealth(1000);
+  if (!healthyBeforeStart) {
+    server = spawn("npm", ["run", "dev:server"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
 
-  server.stderr.on("data", (chunk) => {
-    process.stderr.write(String(chunk));
-  });
+    server.stdout.on("data", (chunk) => {
+      process.stdout.write(String(chunk));
+    });
+
+    server.stderr.on("data", (chunk) => {
+      process.stderr.write(String(chunk));
+    });
+  }
 
   try {
     const healthy = await waitForHealth(SERVER_START_TIMEOUT_MS);
@@ -102,13 +137,7 @@ async function runSmoke() {
       return 1;
     }
 
-    const admin = await req("/api/auth/login", {
-      method: "POST",
-      body: {
-        email: "admin@tellnab.local",
-        password: "ChangeMeNow!123",
-      },
-    });
+    const admin = await loginAsAdmin();
     if (!admin.ok) {
       logFailure("ADMIN_LOGIN", admin);
       return 1;
@@ -189,7 +218,7 @@ async function runSmoke() {
 
     return 0;
   } finally {
-    if (!server.killed) {
+    if (server && !server.killed) {
       server.kill("SIGTERM");
     }
   }

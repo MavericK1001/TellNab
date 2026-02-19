@@ -177,8 +177,10 @@ export default function Groups() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
       <section className="space-y-4">
-        <Card>
-          <h1 className="text-2xl font-bold text-white">Discussion Groups</h1>
+        <Card className="rounded-3xl border-white/15 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+            Discussion Groups
+          </h1>
           <p className="mt-1 text-sm text-slate-300">
             Start focused public/private communities around specific decisions.
           </p>
@@ -190,17 +192,17 @@ export default function Groups() {
                 required
                 minLength={3}
                 placeholder="Group name"
-                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
               />
               <textarea
                 name="description"
                 rows={3}
                 placeholder="What is this group for?"
-                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
               />
               <select
                 name="visibility"
-                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
                 defaultValue="PUBLIC"
               >
                 <option value="PUBLIC">Public</option>
@@ -225,7 +227,7 @@ export default function Groups() {
           ) : null}
         </Card>
 
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/60">
           <h2 className="text-lg font-semibold text-white">Available groups</h2>
           {loading ? (
             <p className="mt-3 text-sm text-slate-300">Loading…</p>
@@ -236,7 +238,7 @@ export default function Groups() {
                 key={group.id}
                 type="button"
                 onClick={() => setSelectedGroupId(group.id)}
-                className={`block w-full rounded-lg border p-3 text-left transition ${
+                className={`block w-full rounded-xl border p-3 text-left transition ${
                   selectedGroupId === group.id
                     ? "border-violet-400/50 bg-violet-500/10"
                     : "border-white/10 bg-slate-950"
@@ -261,7 +263,7 @@ export default function Groups() {
       </section>
 
       <section className="space-y-4">
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/60">
           <h2 className="text-lg font-semibold text-white">Group details</h2>
           {!selectedGroup ? (
             <p className="mt-3 text-sm text-slate-300">
@@ -299,7 +301,7 @@ export default function Groups() {
         </Card>
 
         {selectedGroup && canReviewRequests ? (
-          <Card>
+          <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/60">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
               Join requests
             </h3>
@@ -313,7 +315,7 @@ export default function Groups() {
               {joinRequests.map((request) => (
                 <div
                   key={request.id}
-                  className="rounded-lg border border-white/10 bg-slate-950 p-3"
+                  className="rounded-xl border border-white/10 bg-slate-950 p-3"
                 >
                   <p className="text-sm font-medium text-white">
                     {request.requester.name}

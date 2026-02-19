@@ -19,9 +19,14 @@ export type AdvicePost = {
 
 export type UserProfile = {
   id: string;
+  email: string;
   name: string;
   role: UserRole;
+  authProvider?: "LOCAL" | "GOOGLE" | "APPLE" | string;
+  hasPassword?: boolean;
   bio: string;
+  avatarUrl?: string | null;
+  coverImageUrl?: string | null;
   memberSince: string;
   asks: number;
   replies: number;
@@ -179,6 +184,11 @@ export type AuthUser = {
   id: string;
   email: string;
   name: string;
+  bio?: string;
+  avatarUrl?: string | null;
+  coverImageUrl?: string | null;
+  authProvider?: "LOCAL" | "GOOGLE" | "APPLE" | string;
+  hasPassword?: boolean;
   role: UserRole;
   isActive: boolean;
   createdAt?: string;
@@ -207,6 +217,7 @@ export type AdviceItem = {
   status: AdviceStatus;
   isLocked: boolean;
   isFeatured: boolean;
+  isSpam: boolean;
   isBoostActive: boolean;
   boostExpiresAt?: string | null;
   holdReason?: string | null;
@@ -341,4 +352,25 @@ export type AdviceBoostCheckout = {
   };
   advice: AdviceItem;
   message: string;
+};
+
+export type AdviceAiAssistResult = {
+  draftTitle: string;
+  draftBody: string;
+  suggestions: string[];
+  provider: "mock" | "openai" | string;
+};
+
+export type CommentAiAssistResult = {
+  draftComment: string;
+  suggestions: string[];
+  provider: "mock" | "openai" | string;
+};
+
+export type ModerationAiHintResult = {
+  recommendedAction: "APPROVED" | "HOLD" | "REMOVED" | "KEEP_STATUS";
+  priority: "LOW" | "MEDIUM" | "HIGH";
+  rationale: string;
+  checks: string[];
+  provider: "mock" | "openai" | string;
 };

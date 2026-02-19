@@ -8,6 +8,7 @@ import {
   deleteAdviceCommentAsModerator,
   deleteMyAdviceComment,
   followAdviceThread,
+  generateCommentDraftWithAi,
   getAdviceDetail,
   moderateAdvice,
   unfollowAdviceThread,
@@ -24,6 +25,14 @@ export default function AdviceDetail() {
   const [comments, setComments] = useState<AdviceComment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<AdviceComment | null>(null);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentAiLoading, setCommentAiLoading] = useState(false);
+  const [commentAiSuggestions, setCommentAiSuggestions] = useState<string[]>(
+    [],
+  );
+  const [commentAiProvider, setCommentAiProvider] = useState<string | null>(
+    null,
+  );
   const [followPending, setFollowPending] = useState(false);
   const [boostPending, setBoostPending] = useState(false);
   const [boostMessage, setBoostMessage] = useState<string | null>(null);
@@ -111,16 +120,44 @@ export default function AdviceDetail() {
     event.preventDefault();
     if (!id) return;
 
-    const form = new FormData(event.currentTarget);
-    const body = String(form.get("body") || "");
-
     try {
-      await addAdviceComment(id, { body, parentId: replyTo?.id });
-      event.currentTarget.reset();
+      await addAdviceComment(id, { body: commentBody, parentId: replyTo?.id });
+      setCommentBody("");
+      setCommentAiSuggestions([]);
+      setCommentAiProvider(null);
       setReplyTo(null);
       await load();
     } catch {
       setError("Comment failed. Thread might be locked.");
+    }
+  }
+
+  async function onAiAssistComment() {
+    if (!advice) return;
+    if (commentBody.trim().length < 6 && !replyTo) {
+      setError("Write a short draft first, or choose a reply target.");
+      return;
+    }
+
+    try {
+      setCommentAiLoading(true);
+      setError(null);
+
+      const result = await generateCommentDraftWithAi({
+        adviceTitle: advice.title,
+        adviceBody: advice.body,
+        parentComment: replyTo?.body,
+        draft: commentBody,
+        targetTone: "balanced",
+      });
+
+      setCommentBody(result.draftComment || commentBody);
+      setCommentAiSuggestions(result.suggestions || []);
+      setCommentAiProvider(result.provider || null);
+    } catch (error) {
+      setError(parseApiError(error, "AI comment assist failed."));
+    } finally {
+      setCommentAiLoading(false);
     }
   }
 
@@ -177,7 +214,7 @@ export default function AdviceDetail() {
     }
   }
 
-  async function onToggleFlag(key: "isLocked" | "isFeatured") {
+  async function onToggleFlag(key: "isLocked" | "isFeatured" | "isSpam") {
     if (!id || !advice || !isModeratorOrAdmin) return;
 
     try {
@@ -185,7 +222,13 @@ export default function AdviceDetail() {
       setModerationMessage(null);
       await updateAdviceFlags(id, { [key]: !advice[key] });
       setModerationMessage(
-        `${key === "isLocked" ? "Lock" : "Feature"} flag updated.`,
+        `${
+          key === "isLocked"
+            ? "Lock"
+            : key === "isFeatured"
+            ? "Feature"
+            : "Spam"
+        } flag updated.`,
       );
       await load();
     } catch {
@@ -284,7 +327,7 @@ export default function AdviceDetail() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65">
         <h1 className="text-2xl font-bold text-white">{advice.title}</h1>
         <p className="mt-2 text-slate-300">{advice.body}</p>
         <p className="mt-2 text-xs text-slate-400">
@@ -299,7 +342,7 @@ export default function AdviceDetail() {
               type="button"
               disabled={followPending}
               onClick={() => void onToggleFollow()}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
                 advice.isFollowing
                   ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-200"
                   : "border-violet-300/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
@@ -331,7 +374,7 @@ export default function AdviceDetail() {
               type="button"
               disabled={boostPending || advice.isBoostActive || advice.isLocked}
               onClick={() => void onBoost()}
-              className={`rounded-lg border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20 ${
+              className={`rounded-xl border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20 ${
                 boostPending || advice.isBoostActive || advice.isLocked
                   ? "cursor-not-allowed opacity-70"
                   : ""
@@ -353,7 +396,7 @@ export default function AdviceDetail() {
       </Card>
 
       {isModeratorOrAdmin ? (
-        <Card>
+        <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65">
           <h2 className="text-lg font-semibold text-white">
             Thread management
           </h2>
@@ -396,6 +439,13 @@ export default function AdviceDetail() {
             >
               {advice.isFeatured ? "Unfeature" : "Feature"}
             </Button>
+            <Button
+              variant="secondary"
+              disabled={moderationPending}
+              onClick={() => void onToggleFlag("isSpam")}
+            >
+              {advice.isSpam ? "Unmark spam" : "Mark spam"}
+            </Button>
           </div>
           {moderationMessage ? (
             <p className="mt-2 text-xs text-slate-300">{moderationMessage}</p>
@@ -403,7 +453,7 @@ export default function AdviceDetail() {
         </Card>
       ) : null}
 
-      <Card>
+      <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65">
         <h2 className="text-lg font-semibold text-white">Comments</h2>
         <div className="mt-3 space-y-2">
           {renderComments(null)}
@@ -434,13 +484,37 @@ export default function AdviceDetail() {
               <input
                 name="body"
                 required
+                value={commentBody}
+                onChange={(event) => setCommentBody(event.target.value)}
                 placeholder={replyTo ? "Write your reply" : "Write a comment"}
-                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
               />
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void onAiAssistComment()}
+                disabled={commentAiLoading}
+              >
+                {commentAiLoading ? "AI..." : "AI assist"}
+              </Button>
               <Button type="submit" variant="secondary">
                 {replyTo ? "Reply" : "Comment"}
               </Button>
             </form>
+
+            {commentAiSuggestions.length > 0 ? (
+              <div className="mt-2 rounded-lg border border-violet-300/20 bg-violet-500/10 p-2">
+                <p className="text-[11px] text-violet-100">
+                  AI suggestions
+                  {commentAiProvider ? ` (${commentAiProvider})` : ""}
+                </p>
+                <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] text-slate-300">
+                  {commentAiSuggestions.map((item, index) => (
+                    <li key={`${item}-${index}`}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </>
         ) : null}
       </Card>

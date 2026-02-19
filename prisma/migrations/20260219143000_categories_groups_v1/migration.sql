@@ -65,10 +65,6 @@ CREATE TABLE "GroupModerationAction" (
     CONSTRAINT "GroupModerationAction_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
--- AlterTable
-ALTER TABLE "Advice" ADD COLUMN "categoryId" TEXT REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "Advice" ADD COLUMN "groupId" TEXT REFERENCES "DiscussionGroup"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
 -- CreateIndex
 CREATE UNIQUE INDEX "Category_slug_key" ON "Category"("slug");
 

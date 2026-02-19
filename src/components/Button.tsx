@@ -14,12 +14,15 @@ type ButtonProps = {
 };
 
 const base =
-  "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400";
+  "inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold tracking-[0.01em] transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-violet-500 text-white hover:bg-violet-400",
-  secondary: "border border-white/20 text-slate-200 hover:bg-white/10",
-  ghost: "text-slate-300 hover:bg-white/10 hover:text-white",
+  primary:
+    "bg-gradient-to-r from-violet-500 via-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-900/30 hover:-translate-y-0.5 hover:from-violet-400 hover:to-fuchsia-400 hover:shadow-violet-900/45 active:translate-y-0",
+  secondary:
+    "border border-white/15 bg-slate-900/70 text-slate-100 shadow-[inset_0_1px_0_0_rgb(255_255_255_/_0.06)] hover:-translate-y-0.5 hover:border-white/25 hover:bg-slate-800/80",
+  ghost:
+    "border border-transparent text-slate-300 hover:-translate-y-0.5 hover:border-white/10 hover:bg-white/10 hover:text-white",
 };
 
 export default function Button({

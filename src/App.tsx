@@ -23,9 +23,9 @@ import ProtectedRoute from "./components/ProtectedRoute";
 export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(900px_400px_at_10%_-10%,rgba(124,58,237,0.35),transparent),radial-gradient(800px_380px_at_90%_0%,rgba(59,130,246,0.3),transparent)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1080px_520px_at_8%_-12%,rgba(124,58,237,0.34),transparent),radial-gradient(980px_460px_at_95%_0%,rgba(56,189,248,0.26),transparent),radial-gradient(760px_420px_at_50%_110%,rgba(16,185,129,0.12),transparent)]" />
       <Navbar />
-      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/ask" element={<Ask />} />

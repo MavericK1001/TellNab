@@ -7,6 +7,8 @@ import {
   AdminOverview,
   AdviceComment,
   AdviceBoostCheckout,
+  AdviceAiAssistResult,
+  CommentAiAssistResult,
   AdviceItem,
   AdvicePost,
   AdviceStatus,
@@ -20,6 +22,7 @@ import {
   GroupMember,
   HomeOverview,
   NotificationItem,
+  ModerationAiHintResult,
   ModerationActivityItem,
   ModerationGroupRequest,
   PrivateMessage,
@@ -159,9 +162,14 @@ export async function getProfile(): Promise<UserProfile> {
     const user = await fetchCurrentUser();
     return {
       id: user.id,
+      email: user.email,
       name: user.name,
       role: user.role,
+      authProvider: user.authProvider,
+      hasPassword: user.hasPassword,
       bio: "Complete your first thread to build your TellNab profile impact.",
+      avatarUrl: user.avatarUrl || null,
+      coverImageUrl: user.coverImageUrl || null,
       memberSince: user.createdAt || new Date().toISOString(),
       asks: 0,
       replies: 0,
@@ -210,6 +218,18 @@ export async function loginAccount(payload: {
   return data;
 }
 
+export async function socialLoginAccount(payload: {
+  provider: "google" | "apple";
+  providerSubject: string;
+  email?: string;
+  name?: string;
+  avatarUrl?: string;
+}): Promise<AuthResponse> {
+  const data = await postWithFallback<AuthResponse>("/auth/social", payload);
+  setAuthToken(data.token);
+  return data;
+}
+
 export async function logoutAccount(): Promise<void> {
   await api.post("/auth/logout");
   setAuthToken(undefined);
@@ -218,6 +238,25 @@ export async function logoutAccount(): Promise<void> {
 export async function fetchCurrentUser(): Promise<AuthUser> {
   const response = await api.get<{ user: AuthUser }>("/auth/me");
   return response.data.user;
+}
+
+export async function updateProfileSettings(payload: {
+  name?: string;
+  email?: string;
+  bio?: string;
+  avatarUrl?: string | null;
+  coverImageUrl?: string | null;
+}): Promise<UserProfile> {
+  const response = await api.patch<{ profile: UserProfile }>("/profile", payload);
+  return response.data.profile;
+}
+
+export async function updateProfilePassword(payload: {
+  currentPassword?: string;
+  newPassword: string;
+}): Promise<{ success: boolean; message: string }> {
+  const response = await api.patch<{ success: boolean; message: string }>("/profile/password", payload);
+  return response.data;
 }
 
 export async function getAdminUsers(): Promise<AdminUser[]> {
@@ -405,6 +444,40 @@ export async function createAdvice(payload: {
   }
 }
 
+export async function generateAdviceDraftWithAi(payload: {
+  title?: string;
+  question: string;
+  targetTone?: "balanced" | "direct" | "empathetic";
+  outcome?: string;
+  anonymous?: boolean;
+}): Promise<AdviceAiAssistResult> {
+  const response = await api.post<AdviceAiAssistResult>("/ai/advice-assist", payload);
+  return response.data;
+}
+
+export async function generateCommentDraftWithAi(payload: {
+  adviceTitle: string;
+  adviceBody: string;
+  parentComment?: string;
+  draft?: string;
+  targetTone?: "balanced" | "direct" | "empathetic";
+}): Promise<CommentAiAssistResult> {
+  const response = await api.post<CommentAiAssistResult>("/ai/comment-assist", payload);
+  return response.data;
+}
+
+export async function generateModerationHintWithAi(payload: {
+  title: string;
+  body: string;
+  status: AdviceStatus;
+  isLocked: boolean;
+  isFeatured: boolean;
+  isSpam: boolean;
+}): Promise<ModerationAiHintResult> {
+  const response = await api.post<ModerationAiHintResult>("/ai/moderation-hint", payload);
+  return response.data;
+}
+
 export async function listAdvice(
   status?: AdviceStatus,
   options?: { categoryId?: string; groupId?: string },
@@ -551,7 +624,7 @@ export async function moderateAdvice(
 
 export async function updateAdviceFlags(
   id: string,
-  payload: { isLocked?: boolean; isFeatured?: boolean },
+  payload: { isLocked?: boolean; isFeatured?: boolean; isSpam?: boolean },
 ): Promise<AdviceItem> {
   const response = await api.patch<{ advice: AdviceItem }>(`/moderation/advice/${id}/flags`, payload);
   return response.data.advice;

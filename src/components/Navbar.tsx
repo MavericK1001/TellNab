@@ -3,24 +3,24 @@ import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const desktopBaseClass =
-  "rounded-lg px-2.5 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60";
+  "rounded-xl px-3 py-2 text-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60";
 
 const mobileBaseClass =
-  "rounded-lg px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60";
+  "rounded-xl px-3 py-2.5 text-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60";
 
 function desktopNavClass(isActive: boolean) {
   return `${desktopBaseClass} ${
     isActive
-      ? "bg-violet-500/20 text-violet-100"
-      : "text-slate-300 hover:bg-white/10 hover:text-white"
+      ? "border border-violet-300/25 bg-violet-500/18 text-violet-100"
+      : "border border-transparent text-slate-300 hover:border-white/10 hover:bg-white/10 hover:text-white"
   }`;
 }
 
 function mobileNavClass(isActive: boolean) {
   return `${mobileBaseClass} ${
     isActive
-      ? "bg-violet-500/20 text-violet-100"
-      : "text-slate-200 hover:bg-white/10"
+      ? "border border-violet-300/25 bg-violet-500/18 text-violet-100"
+      : "border border-transparent text-slate-200 hover:border-white/10 hover:bg-white/10"
   }`;
 }
 
@@ -52,17 +52,17 @@ export default function Navbar() {
     <nav
       className={`sticky top-0 z-30 border-b border-white/10 backdrop-blur-xl transition-all duration-300 ${
         isCompact
-          ? "bg-slate-950/90 shadow-lg shadow-black/20"
-          : "bg-slate-950/70"
+          ? "bg-slate-950/88 shadow-xl shadow-black/30"
+          : "bg-slate-950/65"
       }`}
     >
       <div
-        className={`h-0.5 w-full bg-gradient-to-r from-violet-500/40 via-sky-400/30 to-emerald-400/30 transition-opacity duration-300 ${
-          isCompact ? "opacity-60" : "opacity-100"
+        className={`h-px w-full bg-gradient-to-r from-violet-500/45 via-sky-400/30 to-emerald-400/35 transition-opacity duration-300 ${
+          isCompact ? "opacity-70" : "opacity-100"
         }`}
       />
       <div
-        className={`mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 transition-all duration-300 ${
+        className={`mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 transition-all duration-300 ${
           isCompact ? "py-2" : "py-3"
         }`}
       >
@@ -74,14 +74,14 @@ export default function Navbar() {
               isCompact ? "text-base" : "text-lg"
             }`}
           >
-            <span className="h-2.5 w-2.5 rounded-full bg-violet-400 shadow-[0_0_24px_2px_rgba(167,139,250,0.9)]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-violet-300 shadow-[0_0_26px_3px_rgba(167,139,250,0.9)]" />
             <span>TellNab</span>
           </Link>
 
           <button
             type="button"
             onClick={() => setMobileOpen((prev) => !prev)}
-            className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10 lg:hidden"
+            className="inline-flex items-center rounded-xl border border-white/10 bg-slate-900/65 px-3 py-2 text-sm text-slate-200 transition hover:border-white/20 hover:bg-white/10 lg:hidden"
             aria-expanded={mobileOpen}
             aria-label="Toggle navigation menu"
           >
@@ -178,13 +178,13 @@ export default function Navbar() {
             ) : (
               <>
                 <span className="mx-1 h-5 w-px bg-white/10" />
-                <span className="rounded-full border border-white/10 bg-slate-900 px-2.5 py-1 text-[11px] text-slate-300">
+                <span className="rounded-full border border-white/12 bg-slate-900/75 px-2.5 py-1 text-[11px] text-slate-300">
                   {user.name} • {user.role}
                 </span>
                 <button
                   type="button"
                   onClick={() => void logout()}
-                  className="rounded-lg px-2.5 py-1.5 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  className="rounded-xl border border-transparent px-3 py-2 text-sm text-slate-300 transition hover:border-white/10 hover:bg-white/10 hover:text-white"
                 >
                   Logout
                 </button>
@@ -193,7 +193,7 @@ export default function Navbar() {
 
             <Link
               to="/ask"
-              className={`ml-2 inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-semibold text-white shadow-lg shadow-violet-900/35 transition hover:from-violet-400 hover:to-fuchsia-400 ${
+              className={`ml-2 inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-violet-500 via-violet-500 to-fuchsia-500 text-sm font-semibold text-white shadow-lg shadow-violet-900/35 transition hover:-translate-y-0.5 hover:from-violet-400 hover:to-fuchsia-400 ${
                 isCompact ? "px-3.5 py-1.5" : "px-4 py-2"
               }`}
             >
@@ -211,7 +211,7 @@ export default function Navbar() {
               : "mt-0 max-h-0 opacity-0"
           }`}
         >
-          <div className="grid gap-1 rounded-xl border border-white/10 bg-slate-900/90 p-2">
+          <div className="grid gap-1 rounded-2xl border border-white/10 bg-slate-900/88 p-2 shadow-xl shadow-black/30">
             <NavLink
               to="/"
               onClick={closeMobileMenu}

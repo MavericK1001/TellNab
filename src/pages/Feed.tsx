@@ -51,20 +51,22 @@ export default function Feed() {
 
   return (
     <div className="space-y-6">
-      <SectionTitle
-        title="Thread Feed"
-        subtitle="Live approved threads from the community. Open any thread to read and reply."
-      />
+      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
+        <SectionTitle
+          title="Thread Feed"
+          subtitle="Live approved threads from the community. Open any thread to read and reply."
+        />
+      </div>
 
-      <Card>
+      <Card className="rounded-2xl border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/60">
         <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto] md:items-center">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search threads by title, content, or author"
-            className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+            className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100"
           />
-          <label className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200">
+          <label className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200">
             <input
               type="checkbox"
               checked={featuredOnly}
@@ -75,7 +77,7 @@ export default function Feed() {
           <select
             value={selectedCategoryId}
             onChange={(event) => setSelectedCategoryId(event.target.value)}
-            className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200"
+            className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200"
           >
             <option value="">All categories</option>
             {categories.map((category) => (
@@ -84,7 +86,7 @@ export default function Feed() {
               </option>
             ))}
           </select>
-          <span className="rounded-lg border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200">
+          <span className="rounded-xl border border-violet-300/25 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-200">
             {loading ? "Loading…" : `${filtered.length} threads`}
           </span>
         </div>
@@ -106,7 +108,7 @@ export default function Feed() {
             {filtered.map((post) => (
               <Card
                 key={post.id}
-                className="border-white/15 bg-slate-900/80 transition hover:border-violet-400/40"
+                className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65 transition hover:border-violet-400/40"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -152,7 +154,7 @@ export default function Feed() {
                   </p>
                   <Link
                     to={`/advice/${post.id}`}
-                    className="inline-flex items-center justify-center rounded-lg border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
+                    className="inline-flex items-center justify-center rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
                   >
                     Open thread
                   </Link>
@@ -169,7 +171,7 @@ export default function Feed() {
             ) : null}
           </div>
 
-          <Card className="h-fit">
+          <Card className="h-fit border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
               Feed system status
             </h3>

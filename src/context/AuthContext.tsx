@@ -10,6 +10,7 @@ import {
   loginAccount,
   logoutAccount,
   registerAccount,
+  socialLoginAccount,
   setAuthToken,
 } from "../services/api";
 import { AuthUser } from "../types";
@@ -18,6 +19,10 @@ type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  socialLogin: (
+    provider: "google" | "apple",
+    options?: { email?: string; name?: string; avatarUrl?: string },
+  ) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -26,6 +31,22 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  function getSocialSubject(provider: "google" | "apple") {
+    const key = `tellnab_social_subject_${provider}`;
+    const fallback = `${provider}-${Math.random().toString(36).slice(2, 12)}`;
+
+    if (typeof window === "undefined") return fallback;
+
+    try {
+      const existing = window.localStorage.getItem(key);
+      if (existing) return existing;
+      window.localStorage.setItem(key, fallback);
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -58,13 +79,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(response.user);
   }
 
+  async function socialLogin(
+    provider: "google" | "apple",
+    options?: { email?: string; name?: string; avatarUrl?: string },
+  ) {
+    const response = await socialLoginAccount({
+      provider,
+      providerSubject: getSocialSubject(provider),
+      email: options?.email,
+      name: options?.name,
+      avatarUrl: options?.avatarUrl,
+    });
+    setUser(response.user);
+  }
+
   async function logout() {
     await logoutAccount();
     setUser(null);
   }
 
   const value = useMemo(
-    () => ({ user, loading, login, register, logout, refresh }),
+    () => ({ user, loading, login, socialLogin, register, logout, refresh }),
     [user, loading],
   );
 
