@@ -1583,59 +1583,113 @@ app.post("/api/support/tickets", async (req, res) => {
       return res.status(400).json({ message: "Invalid page URL" });
     }
 
-    const ticket = await prisma.$transaction(async (tx) => {
-      const created = await tx.supportTicket.create({
-        data: {
-          type: data.type,
-          priority,
-          status: SUPPORT_TICKET_STATUS.OPEN,
-          requesterName: data.requesterName.trim(),
-          requesterEmail: data.requesterEmail.toLowerCase(),
-          subject: data.subject.trim(),
-          message: data.message.trim(),
-          pageUrl: safePageUrl,
-          firstResponseDueAt,
-          ipAddress: req.ip || null,
-          userAgent: normalizeOptionalText(req.headers["user-agent"]),
-        },
+    let createdTicketId = null;
+
+    try {
+      const ticket = await prisma.$transaction(async (tx) => {
+        const created = await tx.supportTicket.create({
+          data: {
+            type: data.type,
+            priority,
+            status: SUPPORT_TICKET_STATUS.OPEN,
+            requesterName: data.requesterName.trim(),
+            requesterEmail: data.requesterEmail.toLowerCase(),
+            subject: data.subject.trim(),
+            message: data.message.trim(),
+            pageUrl: safePageUrl,
+            firstResponseDueAt,
+            ipAddress: req.ip || null,
+            userAgent: normalizeOptionalText(req.headers["user-agent"]),
+          },
+        });
+
+        createdTicketId = created.id;
+
+        await tx.supportTicketMessage.create({
+          data: {
+            ticketId: created.id,
+            senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+            senderName: created.requesterName,
+            senderEmail: created.requesterEmail,
+            body: created.message,
+          },
+        });
+
+        return tx.supportTicket.findUnique({
+          where: { id: created.id },
+          include: {
+            resolvedBy: {
+              select: { id: true, name: true, role: true },
+            },
+            assignedTo: {
+              select: { id: true, name: true, role: true, email: true },
+            },
+          },
+        });
       });
 
-      await tx.supportTicketMessage.create({
-        data: {
-          ticketId: created.id,
-          senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
-          senderName: created.requesterName,
-          senderEmail: created.requesterEmail,
-          body: created.message,
-        },
-      });
+      if (ticket) {
+        return res.status(201).json({
+          message: "Support request received. We will get back to you soon.",
+          ticket: serializeSupportTicket(ticket),
+        });
+      }
+    } catch (primaryError) {
+      console.error("[support] primary ticket create failed", primaryError);
+    }
 
-      return tx.supportTicket.findUnique({
-        where: { id: created.id },
-        include: {
-          resolvedBy: {
-            select: { id: true, name: true, role: true },
-          },
-          assignedTo: {
-            select: { id: true, name: true, role: true, email: true },
-          },
-        },
-      });
+    // Fallback path for environments where newer support columns/relations are not yet migrated.
+    const fallbackTicket = await prisma.supportTicket.create({
+      data: {
+        type: data.type,
+        requesterName: data.requesterName.trim(),
+        requesterEmail: data.requesterEmail.toLowerCase(),
+        subject: data.subject.trim(),
+        message: data.message.trim(),
+        pageUrl: safePageUrl,
+      },
+      select: {
+        id: true,
+      },
     });
 
-    if (!ticket) {
-      return res.status(500).json({ message: "Failed to create support ticket" });
+    createdTicketId = fallbackTicket.id;
+
+    try {
+      await prisma.supportTicketMessage.create({
+        data: {
+          ticketId: fallbackTicket.id,
+          senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+          senderName: data.requesterName.trim(),
+          senderEmail: data.requesterEmail.toLowerCase(),
+          body: data.message.trim(),
+        },
+      });
+    } catch (messageError) {
+      console.error("[support] fallback message create failed", messageError);
     }
 
     return res.status(201).json({
       message: "Support request received. We will get back to you soon.",
-      ticket: serializeSupportTicket(ticket),
+      ticket: {
+        id: createdTicketId,
+        status: SUPPORT_TICKET_STATUS.OPEN,
+        priority,
+      },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
-    return res.status(500).json({ message: "Failed to submit support request" });
+
+    console.error("[support] submit failed", error);
+    return res.status(500).json({
+      message: "Failed to submit support request",
+      code:
+        error && typeof error === "object" && typeof error.code === "string"
+          ? error.code
+          : undefined,
+    });
   }
 });
 
