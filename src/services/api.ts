@@ -109,6 +109,10 @@ function isNetworkError(error: unknown): boolean {
   return axios.isAxiosError(error) && !error.response;
 }
 
+function isNotFoundError(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 404;
+}
+
 function resolveApiUrl(base: string, path: string): string {
   if (base.startsWith("http://") || base.startsWith("https://")) {
     return `${base}${path}`;
@@ -126,7 +130,7 @@ async function postWithFallback<T>(path: string, payload: unknown): Promise<T> {
     const response = await api.post<T>(path, payload);
     return response.data;
   } catch (error) {
-    if (!isNetworkError(error)) {
+    if (!isNetworkError(error) && !isNotFoundError(error)) {
       throw error;
     }
 
@@ -135,7 +139,7 @@ async function postWithFallback<T>(path: string, payload: unknown): Promise<T> {
         const response = await api.post<T>(`${base}${path}`, payload);
         return response.data;
       } catch (fallbackError) {
-        if (!isNetworkError(fallbackError)) {
+        if (!isNetworkError(fallbackError) && !isNotFoundError(fallbackError)) {
           throw fallbackError;
         }
       }
