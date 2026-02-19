@@ -1922,32 +1922,82 @@ app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, as
         : {}),
     };
 
-    const tickets = await prisma.supportTicket.findMany({
+    try {
+      const tickets = await prisma.supportTicket.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }],
+        take: limit,
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+          messages: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      return res.json({
+        tickets: tickets.map((ticket) => {
+          const serialized = serializeSupportTicket(ticket);
+          return {
+            ...serialized,
+            latestMessage: ticket.messages[0] ? serializeSupportTicketMessage(ticket.messages[0]) : null,
+          };
+        }),
+      });
+    } catch (primaryError) {
+      console.error("[support] agent ticket list primary query failed, using fallback", primaryError);
+    }
+
+    const fallbackTickets = await prisma.supportTicket.findMany({
       where,
       orderBy: [{ updatedAt: "desc" }],
       take: limit,
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        assignedTo: {
-          select: { id: true, name: true, role: true, email: true },
-        },
-        messages: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
+      select: {
+        id: true,
+        type: true,
+        priority: true,
+        status: true,
+        requesterName: true,
+        requesterEmail: true,
+        subject: true,
+        message: true,
+        pageUrl: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     return res.json({
-      tickets: tickets.map((ticket) => {
-        const serialized = serializeSupportTicket(ticket);
-        return {
-          ...serialized,
-          latestMessage: ticket.messages[0] ? serializeSupportTicketMessage(ticket.messages[0]) : null,
-        };
-      }),
+      tickets: fallbackTickets.map((ticket) => ({
+        id: ticket.id,
+        type: ticket.type,
+        priority: ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL,
+        slaTargetHours: getSupportSlaHours(ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        slaLabel: getSupportSlaLabel(ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        status: ticket.status || SUPPORT_TICKET_STATUS.OPEN,
+        requesterName: ticket.requesterName,
+        requesterEmail: ticket.requesterEmail,
+        subject: ticket.subject,
+        message: ticket.message,
+        pageUrl: ticket.pageUrl,
+        firstResponseDueAt: null,
+        firstResponseAt: null,
+        isSlaBreached: false,
+        internalNote: null,
+        resolutionSummary: null,
+        assignedTo: null,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        resolvedAt: null,
+        resolvedBy: null,
+        latestMessage: null,
+      })),
     });
   } catch {
     return res.status(500).json({ message: "Failed to fetch support tickets" });
@@ -1956,28 +2006,104 @@ app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, as
 
 app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired, async (req, res) => {
   try {
-    const ticket = await prisma.supportTicket.findUnique({
+    try {
+      const ticket = await prisma.supportTicket.findUnique({
+        where: { id: req.params.id },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+          messages: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+
+      if (!ticket) {
+        return res.status(404).json({ message: "Support ticket not found" });
+      }
+
+      return res.json({
+        ticket: serializeSupportTicket(ticket),
+        messages: ticket.messages.map((message) => serializeSupportTicketMessage(message)),
+      });
+    } catch (primaryError) {
+      console.error("[support] agent ticket detail primary query failed, using fallback", primaryError);
+    }
+
+    const fallbackTicket = await prisma.supportTicket.findUnique({
       where: { id: req.params.id },
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        assignedTo: {
-          select: { id: true, name: true, role: true, email: true },
-        },
-        messages: {
-          orderBy: { createdAt: "asc" },
-        },
+      select: {
+        id: true,
+        type: true,
+        priority: true,
+        status: true,
+        requesterName: true,
+        requesterEmail: true,
+        subject: true,
+        message: true,
+        pageUrl: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
-    if (!ticket) {
+    if (!fallbackTicket) {
       return res.status(404).json({ message: "Support ticket not found" });
     }
 
+    let messages = [];
+    try {
+      const rows = await prisma.supportTicketMessage.findMany({
+        where: { ticketId: fallbackTicket.id },
+        orderBy: { createdAt: "asc" },
+      });
+      messages = rows.map((message) => serializeSupportTicketMessage(message));
+    } catch (messageError) {
+      console.error("[support] agent ticket detail message fallback failed", messageError);
+    }
+
+    if (messages.length === 0 && fallbackTicket.message) {
+      messages.push({
+        id: `initial-${fallbackTicket.id}`,
+        ticketId: fallbackTicket.id,
+        senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+        senderName: fallbackTicket.requesterName,
+        senderEmail: fallbackTicket.requesterEmail,
+        senderUserId: null,
+        body: fallbackTicket.message,
+        createdAt: fallbackTicket.createdAt,
+      });
+    }
+
     return res.json({
-      ticket: serializeSupportTicket(ticket),
-      messages: ticket.messages.map((message) => serializeSupportTicketMessage(message)),
+      ticket: {
+        id: fallbackTicket.id,
+        type: fallbackTicket.type,
+        priority: fallbackTicket.priority || SUPPORT_TICKET_PRIORITY.NORMAL,
+        slaTargetHours: getSupportSlaHours(fallbackTicket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        slaLabel: getSupportSlaLabel(fallbackTicket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        status: fallbackTicket.status || SUPPORT_TICKET_STATUS.OPEN,
+        requesterName: fallbackTicket.requesterName,
+        requesterEmail: fallbackTicket.requesterEmail,
+        subject: fallbackTicket.subject,
+        message: fallbackTicket.message,
+        pageUrl: fallbackTicket.pageUrl,
+        firstResponseDueAt: null,
+        firstResponseAt: null,
+        isSlaBreached: false,
+        internalNote: null,
+        resolutionSummary: null,
+        assignedTo: null,
+        createdAt: fallbackTicket.createdAt,
+        updatedAt: fallbackTicket.updatedAt,
+        resolvedAt: null,
+        resolvedBy: null,
+      },
+      messages,
     });
   } catch {
     return res.status(500).json({ message: "Failed to fetch support ticket" });
