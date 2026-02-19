@@ -2140,31 +2140,110 @@ app.get("/api/support/tickets/:id/thread", async (req, res) => {
     const query = supportTicketThreadLookupSchema.parse(req.query || {});
     const requesterEmail = query.requesterEmail.toLowerCase();
 
-    const ticket = await prisma.supportTicket.findFirst({
+    try {
+      const ticket = await prisma.supportTicket.findFirst({
+        where: {
+          id: req.params.id,
+          requesterEmail,
+        },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true },
+          },
+          messages: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+
+      return res.json({
+        ticket: serializeSupportTicket(ticket),
+        messages: ticket.messages.map((message) => serializeSupportTicketMessage(message)),
+      });
+    } catch (primaryError) {
+      console.error("[support] thread primary query failed, using fallback", primaryError);
+    }
+
+    const fallbackTicket = await prisma.supportTicket.findFirst({
       where: {
         id: req.params.id,
         requesterEmail,
       },
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        assignedTo: {
-          select: { id: true, name: true, role: true },
-        },
-        messages: {
-          orderBy: { createdAt: "asc" },
-        },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        priority: true,
+        requesterName: true,
+        requesterEmail: true,
+        subject: true,
+        message: true,
+        pageUrl: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
-    if (!ticket) {
+    if (!fallbackTicket) {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
+    let fallbackMessages = [];
+    try {
+      const rows = await prisma.supportTicketMessage.findMany({
+        where: { ticketId: fallbackTicket.id },
+        orderBy: { createdAt: "asc" },
+      });
+      fallbackMessages = rows.map((message) => serializeSupportTicketMessage(message));
+    } catch (messageError) {
+      console.error("[support] thread message fallback failed", messageError);
+    }
+
+    if (fallbackMessages.length === 0 && fallbackTicket.message) {
+      fallbackMessages.push({
+        id: `initial-${fallbackTicket.id}`,
+        ticketId: fallbackTicket.id,
+        senderType: SUPPORT_MESSAGE_SENDER.MEMBER,
+        senderName: fallbackTicket.requesterName,
+        senderEmail: fallbackTicket.requesterEmail,
+        senderUserId: null,
+        body: fallbackTicket.message,
+        createdAt: fallbackTicket.createdAt,
+      });
+    }
+
     return res.json({
-      ticket: serializeSupportTicket(ticket),
-      messages: ticket.messages.map((message) => serializeSupportTicketMessage(message)),
+      ticket: {
+        id: fallbackTicket.id,
+        type: fallbackTicket.type,
+        priority: fallbackTicket.priority || SUPPORT_TICKET_PRIORITY.NORMAL,
+        slaTargetHours: getSupportSlaHours(fallbackTicket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        slaLabel: getSupportSlaLabel(fallbackTicket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        status: fallbackTicket.status || SUPPORT_TICKET_STATUS.OPEN,
+        requesterName: fallbackTicket.requesterName,
+        requesterEmail: fallbackTicket.requesterEmail,
+        subject: fallbackTicket.subject,
+        message: fallbackTicket.message,
+        pageUrl: fallbackTicket.pageUrl,
+        firstResponseDueAt: null,
+        firstResponseAt: null,
+        isSlaBreached: false,
+        internalNote: null,
+        resolutionSummary: null,
+        assignedTo: null,
+        createdAt: fallbackTicket.createdAt,
+        updatedAt: fallbackTicket.updatedAt,
+        resolvedAt: null,
+        resolvedBy: null,
+      },
+      messages: fallbackMessages,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
