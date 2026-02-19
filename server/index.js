@@ -229,16 +229,25 @@ const walletTopupLimiter = rateLimit({
   message: { message: "Too many wallet top-up attempts. Please wait and try again." },
 });
 
-const supportLimiter = rateLimit({
+const supportCreateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 10,
+  max: Number(process.env.SUPPORT_CREATE_RATE_LIMIT_MAX || 30),
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
   message: { message: "Too many support submissions. Please try again shortly." },
 });
 
+const supportReplyLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: Number(process.env.SUPPORT_REPLY_RATE_LIMIT_MAX || 60),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { message: "Too many support replies. Please wait and try again." },
+});
+
 app.use("/api/auth", authLimiter);
-app.use("/api/support/tickets", supportLimiter);
 
 function createToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, {
@@ -1577,7 +1586,7 @@ app.get("/", (_req, res) => {
   });
 });
 
-app.post("/api/support/tickets", async (req, res) => {
+app.post("/api/support/tickets", supportCreateLimiter, async (req, res) => {
   try {
     const data = supportTicketCreateSchema.parse(req.body || {});
     const safePageUrl = normalizeOptionalText(data.pageUrl);
@@ -2185,7 +2194,12 @@ app.patch("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequir
   }
 });
 
-app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdminRequired, async (req, res) => {
+app.post(
+  "/api/support/agent/tickets/:id/replies",
+  authRequired,
+  moderatorOrAdminRequired,
+  supportReplyLimiter,
+  async (req, res) => {
   try {
     const data = supportTicketAgentReplySchema.parse(req.body || {});
     const existing = await prisma.supportTicket.findUnique({ where: { id: req.params.id } });
@@ -2343,7 +2357,8 @@ app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdmi
     console.error("[support] agent reply failed", error);
     return res.status(500).json({ message: "Failed to send support reply" });
   }
-});
+  },
+);
 
 app.get("/api/support/tickets/:id/thread", async (req, res) => {
   try {
@@ -2465,7 +2480,7 @@ app.get("/api/support/tickets/:id/thread", async (req, res) => {
   }
 });
 
-app.post("/api/support/tickets/:id/replies", async (req, res) => {
+app.post("/api/support/tickets/:id/replies", supportReplyLimiter, async (req, res) => {
   try {
     const data = supportTicketMemberReplySchema.parse(req.body || {});
     const requesterEmail = data.requesterEmail.toLowerCase();

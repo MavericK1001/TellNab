@@ -146,7 +146,24 @@ async function apiRequest(
         },
         credentials: includeCreds ? "include" : "same-origin",
       });
-      json = await response.json().catch(() => ({}));
+
+      const contentType =
+        response.headers.get("content-type")?.toLowerCase() || "";
+      const isJsonResponse =
+        contentType.includes("application/json") ||
+        contentType.includes("application/problem+json");
+
+      if (!isJsonResponse) {
+        // Some hosts rewrite unknown routes to index.html (200 text/html).
+        // Treat that as an invalid API response and try the next base URL.
+        if (response.ok) {
+          continue;
+        }
+        json = {};
+      } else {
+        json = await response.json().catch(() => ({}));
+      }
+
       if (response.ok) return json;
     } catch (error) {
       lastNetworkError = error;
@@ -194,6 +211,7 @@ export default function App() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedMessages, setSelectedMessages] = useState<TicketMessage[]>([]);
   const [memberReply, setMemberReply] = useState("");
+  const [isMemberChatOpen, setIsMemberChatOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -255,7 +273,8 @@ export default function App() {
           messages: TicketMessage[];
         }> => result.status === "fulfilled",
       )
-      .map((result) => result.value.ticket);
+      .map((result) => result.value.ticket)
+      .filter((ticket): ticket is Ticket => Boolean(ticket && ticket.id));
     setMemberTickets(loaded);
   }
 
@@ -263,6 +282,7 @@ export default function App() {
     const data = await loadMemberThread(ticketId, email.toLowerCase());
     setSelectedTicket(data.ticket);
     setSelectedMessages(data.messages);
+    setIsMemberChatOpen(true);
     saveTicketReference(ticketId, email);
     await refreshSavedTickets();
   }
@@ -763,106 +783,106 @@ export default function App() {
               </div>
             </form>
 
-            <div className="split-grid">
-              <div className="ticket-inbox-list">
-                {memberTickets.length === 0 ? (
-                  <p className="subtle">
-                    No tickets loaded yet. Submit a ticket or lookup by ID +
-                    email.
-                  </p>
-                ) : (
-                  memberTickets.map((ticket) => (
-                    <article
-                      className="ticket-card clickable"
-                      key={ticket.id}
-                      onClick={() =>
-                        openMemberThread(ticket.id, ticket.requesterEmail)
-                      }
-                    >
-                      <div className="ticket-top">
-                        <p className="ticket-id">Ticket: {ticket.id}</p>
-                        <span
-                          className={`status-pill ${String(
-                            ticket.status,
-                          ).toLowerCase()}`}
-                        >
-                          {ticket.status}
-                        </span>
-                      </div>
-                      <p className="ticket-subject">{ticket.subject}</p>
-                      <p className="ticket-meta">
-                        Updated: {new Date(ticket.updatedAt).toLocaleString()}
-                      </p>
-                    </article>
-                  ))
-                )}
-              </div>
-
-              <div className="chat-panel">
-                {!selectedTicket ? (
-                  <p className="subtle">Open a ticket to view the full chat.</p>
-                ) : (
-                  <>
+            <div className="ticket-inbox-list">
+              {memberTickets.length === 0 ? (
+                <p className="subtle">
+                  No tickets loaded yet. Submit a ticket or lookup by ID +
+                  email.
+                </p>
+              ) : (
+                memberTickets.map((ticket) => (
+                  <article
+                    className="ticket-card clickable"
+                    key={ticket.id}
+                    onClick={() =>
+                      openMemberThread(ticket.id, ticket.requesterEmail)
+                    }
+                  >
                     <div className="ticket-top">
-                      <h3>{selectedTicket.subject}</h3>
+                      <p className="ticket-id">Ticket: {ticket.id}</p>
                       <span
-                        className={`status-pill ${String(
-                          selectedTicket.status,
-                        ).toLowerCase()}`}
+                        className={`status-pill ${String(ticket.status).toLowerCase()}`}
                       >
-                        {selectedTicket.status}
+                        {ticket.status}
                       </span>
                     </div>
+                    <p className="ticket-subject">{ticket.subject}</p>
                     <p className="ticket-meta">
-                      Ticket ID: {selectedTicket.id}
+                      Updated: {new Date(ticket.updatedAt).toLocaleString()}
                     </p>
-                    <div className="thread-list">
-                      {selectedMessages.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`chat-bubble ${
-                            item.senderType === "MEMBER"
-                              ? "member"
-                              : item.senderType === "AGENT"
-                              ? "agent"
-                              : "system"
-                          }`}
-                        >
-                          <p className="bubble-meta">
-                            {item.senderName || item.senderType} •{" "}
-                            {new Date(item.createdAt).toLocaleString()}
-                          </p>
-                          <p>{item.body}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <form onSubmit={handleMemberReply}>
-                      <label>
-                        Reply to support
-                        <textarea
-                          value={memberReply}
-                          rows={4}
-                          onChange={(e) => setMemberReply(e.target.value)}
-                          required
-                        />
-                      </label>
-                      <div className="actions">
-                        <button type="submit" disabled={memberReplyLoading}>
-                          {memberReplyLoading ? "Sending..." : "Send reply"}
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={handleMemberClose}
-                        >
-                          Close ticket
-                        </button>
-                      </div>
-                    </form>
-                  </>
-                )}
-              </div>
+                  </article>
+                ))
+              )}
             </div>
+
+            {isMemberChatOpen && selectedTicket ? (
+              <>
+                <div
+                  className="chat-overlay"
+                  onClick={() => setIsMemberChatOpen(false)}
+                />
+                <aside className="chat-drawer" role="dialog" aria-modal="true">
+                  <div className="chat-drawer-head">
+                    <div>
+                      <p className="ticket-meta">Ticket ID: {selectedTicket.id}</p>
+                      <h3>{selectedTicket.subject}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setIsMemberChatOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="thread-list">
+                    {selectedMessages.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`chat-bubble ${
+                          item.senderType === "MEMBER"
+                            ? "member"
+                            : item.senderType === "AGENT"
+                            ? "agent"
+                            : "system"
+                        }`}
+                      >
+                        <p className="bubble-meta">
+                          {item.senderName || item.senderType} •{" "}
+                          {new Date(item.createdAt).toLocaleString()}
+                        </p>
+                        <p>{item.body}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <form onSubmit={handleMemberReply}>
+                    <label>
+                      Reply to support
+                      <textarea
+                        value={memberReply}
+                        rows={4}
+                        onChange={(e) => setMemberReply(e.target.value)}
+                        required
+                      />
+                    </label>
+                    <div className="actions">
+                      <button type="submit" disabled={memberReplyLoading}>
+                        {memberReplyLoading ? "Sending..." : "Send reply"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={handleMemberClose}
+                      >
+                        Close ticket
+                      </button>
+                    </div>
+                  </form>
+                </aside>
+              </>
+            ) : null}
           </section>
         </>
       ) : (
