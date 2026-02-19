@@ -16,9 +16,14 @@ const API_BASE_CANDIDATES = Array.from(
 const form = document.getElementById("support-form");
 const statusEl = document.getElementById("form-status");
 const submitBtn = document.getElementById("submit-btn");
+const lookupForm = document.getElementById("ticket-lookup-form");
+const lookupBtn = document.getElementById("lookup-btn");
+const lookupStatusEl = document.getElementById("lookup-status");
+const ticketInboxListEl = document.getElementById("ticket-inbox-list");
 const prioritySelect = document.getElementById("priority-select");
 const slaInfoEl = document.getElementById("sla-info");
 const statusListEl = document.getElementById("status-list");
+const SAVED_TICKETS_KEY = "tellnab_support_tickets";
 
 const statusItems = [
   {
@@ -53,6 +58,122 @@ const slaLabels = {
 function setStatus(text, tone = "") {
   statusEl.textContent = text;
   statusEl.className = tone;
+}
+
+function setLookupStatus(text, tone = "") {
+  lookupStatusEl.textContent = text;
+  lookupStatusEl.className = tone;
+}
+
+function readSavedTickets() {
+  try {
+    const raw = window.localStorage.getItem(SAVED_TICKETS_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTicketReference(ticketId, requesterEmail) {
+  const existing = readSavedTickets();
+  const next = [
+    { ticketId, requesterEmail: requesterEmail.toLowerCase(), savedAt: new Date().toISOString() },
+    ...existing.filter(
+      (item) =>
+        !(item.ticketId === ticketId && item.requesterEmail === requesterEmail.toLowerCase()),
+    ),
+  ].slice(0, 20);
+
+  try {
+    window.localStorage.setItem(SAVED_TICKETS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage failure
+  }
+}
+
+function renderTicketInbox(tickets) {
+  if (!Array.isArray(tickets) || tickets.length === 0) {
+    ticketInboxListEl.innerHTML =
+      '<p class="subtle">No tickets loaded yet. Submit a ticket or lookup by ID + email.</p>';
+    return;
+  }
+
+  ticketInboxListEl.innerHTML = tickets
+    .map((ticket) => {
+      const reply = ticket.resolutionSummary
+        ? ticket.resolutionSummary
+        : "No reply yet. Our team will update this ticket soon.";
+
+      return `
+        <article class="ticket-card">
+          <div class="ticket-top">
+            <p class="ticket-id">Ticket: ${ticket.id}</p>
+            <span class="status-pill ${String(ticket.status || "OPEN").toLowerCase()}">${ticket.status}</span>
+          </div>
+          <p class="ticket-subject">${ticket.subject}</p>
+          <p class="ticket-meta">Priority: ${ticket.priority} • SLA: ${ticket.slaLabel}</p>
+          <p class="ticket-meta">Updated: ${new Date(ticket.updatedAt).toLocaleString()}</p>
+          <div class="ticket-reply">
+            <p class="ticket-reply-label">Support reply</p>
+            <p>${reply}</p>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function lookupTicket(ticketId, requesterEmail) {
+  const payload = {
+    ticketId: String(ticketId || "").trim(),
+    requesterEmail: String(requesterEmail || "").trim().toLowerCase(),
+  };
+
+  if (payload.ticketId.length < 8) {
+    throw new Error("Ticket ID must be at least 8 characters.");
+  }
+
+  if (!payload.requesterEmail.includes("@")) {
+    throw new Error("Please enter the same email used when submitting the ticket.");
+  }
+
+  let response = null;
+  let json = {};
+  let lastNetworkError = null;
+
+  for (const base of API_BASE_CANDIDATES) {
+    try {
+      response = await fetch(`${base}/support/tickets/status`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      json = await response.json().catch(() => ({}));
+      if (response.ok) {
+        break;
+      }
+    } catch (error) {
+      lastNetworkError = error;
+    }
+  }
+
+  if (!response) {
+    throw lastNetworkError || new Error("Network request failed.");
+  }
+
+  if (!response.ok) {
+    throw new Error(normalizeValidationMessage(json) || "Ticket not found.");
+  }
+
+  if (!json.ticket) {
+    throw new Error("Ticket response missing payload.");
+  }
+
+  return json.ticket;
 }
 
 function normalizeValidationMessage(apiError) {
@@ -116,6 +237,27 @@ renderStatusItems();
 applyQueryPrefill();
 syncSlaInfo();
 prioritySelect.addEventListener("change", syncSlaInfo);
+
+const initialSavedTickets = readSavedTickets();
+if (initialSavedTickets.length > 0) {
+  setLookupStatus("Loading your recent tickets...", "");
+  Promise.allSettled(
+    initialSavedTickets.map((item) => lookupTicket(item.ticketId, item.requesterEmail)),
+  )
+    .then((results) => {
+      const tickets = results
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value);
+      renderTicketInbox(tickets);
+      setLookupStatus(tickets.length ? "Recent tickets loaded." : "No saved tickets found.", "");
+    })
+    .catch(() => {
+      renderTicketInbox([]);
+      setLookupStatus("Could not load saved tickets.", "error");
+    });
+} else {
+  renderTicketInbox([]);
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -190,10 +332,21 @@ form.addEventListener("submit", async (event) => {
     }
 
     form.reset();
+    saveTicketReference(json?.ticket?.id, payload.requesterEmail);
     setStatus(
       `Submitted successfully. Ticket ID: ${json?.ticket?.id || "created"}.`,
       "ok",
     );
+
+    const currentTickets = readSavedTickets();
+    Promise.allSettled(
+      currentTickets.map((item) => lookupTicket(item.ticketId, item.requesterEmail)),
+    ).then((results) => {
+      const tickets = results
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value);
+      renderTicketInbox(tickets);
+    });
   } catch (error) {
     const message =
       error instanceof Error &&
@@ -206,5 +359,33 @@ form.addEventListener("submit", async (event) => {
     setStatus(message, "error");
   } finally {
     submitBtn.disabled = false;
+  }
+});
+
+lookupForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(lookupForm);
+  const ticketId = String(data.get("ticketId") || "").trim();
+  const requesterEmail = String(data.get("requesterEmail") || "").trim();
+
+  lookupBtn.disabled = true;
+  setLookupStatus("Checking ticket...", "");
+
+  try {
+    const ticket = await lookupTicket(ticketId, requesterEmail);
+    saveTicketReference(ticket.id, requesterEmail);
+    const currentTickets = readSavedTickets();
+    const ticketResults = await Promise.allSettled(
+      currentTickets.map((item) => lookupTicket(item.ticketId, item.requesterEmail)),
+    );
+    const tickets = ticketResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    renderTicketInbox(tickets);
+    setLookupStatus("Ticket loaded.", "ok");
+  } catch (error) {
+    setLookupStatus(error instanceof Error ? error.message : "Ticket lookup failed.", "error");
+  } finally {
+    lookupBtn.disabled = false;
   }
 });

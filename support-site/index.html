@@ -23,6 +23,7 @@
           <a href="#status">Status</a>
           <a href="#help">Help center</a>
           <a href="#contact">Contact support</a>
+          <a href="#inbox">Your inbox</a>
         </nav>
       </header>
 
@@ -116,6 +117,32 @@
             <p id="form-status" aria-live="polite"></p>
           </div>
         </form>
+      </section>
+
+      <section class="panel" id="inbox">
+        <h2>Your support inbox</h2>
+        <p class="subtle">
+          Check ticket status and replies from support using your ticket ID and email.
+        </p>
+
+        <form id="ticket-lookup-form" class="lookup-form" novalidate>
+          <div class="grid two">
+            <label>
+              Ticket ID
+              <input name="ticketId" type="text" minlength="8" maxlength="80" required />
+            </label>
+            <label>
+              Email used on ticket
+              <input name="requesterEmail" type="email" maxlength="150" required />
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" id="lookup-btn">Check ticket</button>
+            <p id="lookup-status" aria-live="polite"></p>
+          </div>
+        </form>
+
+        <div id="ticket-inbox-list" class="ticket-inbox-list"></div>
       </section>
 
       <section class="panel">

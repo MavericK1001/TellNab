@@ -215,6 +215,84 @@ textarea {
   gap: 0.8rem;
 }
 
+.lookup-form {
+  margin-bottom: 0.8rem;
+}
+
+.ticket-inbox-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.ticket-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #0d1221;
+  padding: 0.75rem;
+}
+
+.ticket-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.ticket-id {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #c7cff1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.ticket-subject {
+  margin: 0.45rem 0 0;
+  font-weight: 700;
+}
+
+.ticket-meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ticket-reply {
+  margin-top: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #111a31;
+  padding: 0.55rem;
+}
+
+.ticket-reply-label {
+  margin: 0 0 0.3rem;
+  color: #cfd7f8;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-pill.open {
+  border-color: #f7c86e;
+  color: #f7c86e;
+}
+
+.status-pill.in_progress {
+  border-color: #9f8bff;
+  color: #b6a8ff;
+}
+
+.status-pill.resolved {
+  border-color: #54d8a5;
+  color: #54d8a5;
+}
+
+.status-pill.closed {
+  border-color: #95a1ce;
+  color: #95a1ce;
+}
+
 .sla-info {
   margin: 0;
   font-size: 0.82rem;
@@ -243,11 +321,17 @@ button:disabled {
   color: var(--muted);
 }
 
-#form-status.ok {
+#lookup-status {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.ok {
   color: var(--ok);
 }
 
-#form-status.error {
+.error {
   color: var(--error);
 }
 

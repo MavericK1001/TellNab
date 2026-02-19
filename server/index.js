@@ -1440,6 +1440,11 @@ const supportTicketCreateSchema = z.object({
   pageUrl: z.string().max(1000).optional(),
 });
 
+const supportTicketLookupSchema = z.object({
+  ticketId: z.string().min(8).max(80),
+  requesterEmail: z.string().email().max(150),
+});
+
 const supportTicketAdminUpdateSchema = z
   .object({
     status: z
@@ -1514,6 +1519,54 @@ app.post("/api/support/tickets", async (req, res) => {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
     return res.status(500).json({ message: "Failed to submit support request" });
+  }
+});
+
+app.post("/api/support/tickets/status", async (req, res) => {
+  try {
+    const data = supportTicketLookupSchema.parse(req.body || {});
+    const ticket = await prisma.supportTicket.findFirst({
+      where: {
+        id: data.ticketId,
+        requesterEmail: data.requesterEmail.toLowerCase(),
+      },
+      include: {
+        resolvedBy: {
+          select: { id: true, name: true, role: true },
+        },
+      },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    const responseTicket = serializeSupportTicket(ticket);
+    return res.json({
+      ticket: {
+        id: responseTicket.id,
+        type: responseTicket.type,
+        priority: responseTicket.priority,
+        slaTargetHours: responseTicket.slaTargetHours,
+        slaLabel: responseTicket.slaLabel,
+        status: responseTicket.status,
+        subject: responseTicket.subject,
+        message: responseTicket.message,
+        pageUrl: responseTicket.pageUrl,
+        firstResponseDueAt: responseTicket.firstResponseDueAt,
+        firstResponseAt: responseTicket.firstResponseAt,
+        isSlaBreached: responseTicket.isSlaBreached,
+        resolutionSummary: responseTicket.resolutionSummary,
+        createdAt: responseTicket.createdAt,
+        updatedAt: responseTicket.updatedAt,
+        resolvedAt: responseTicket.resolvedAt,
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to lookup support ticket" });
   }
 });
 
