@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { isAxiosError } from "axios";
 import {
   fetchCurrentUser,
   loginAccount,
@@ -115,6 +116,25 @@ async function requestGoogleAuthorizationCode() {
   });
 }
 
+function normalizeApiError(error: unknown, fallback: string) {
+  if (isAxiosError(error)) {
+    const apiMessage =
+      typeof error.response?.data?.message === "string"
+        ? error.response.data.message
+        : null;
+
+    if (apiMessage) {
+      return apiMessage;
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 declare global {
   interface Window {
     google?: {
@@ -172,10 +192,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     _options?: { email?: string; name?: string; avatarUrl?: string },
   ) {
     if (provider === "google") {
-      const code = await requestGoogleAuthorizationCode();
-      const response = await socialLoginGoogleCode({ code });
-      setUser(response.user);
-      return;
+      try {
+        const code = await requestGoogleAuthorizationCode();
+        const response = await socialLoginGoogleCode({ code });
+        setUser(response.user);
+        return;
+      } catch (error) {
+        throw new Error(normalizeApiError(error, "Google sign-in failed."));
+      }
     }
 
     throw new Error(

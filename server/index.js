@@ -1430,7 +1430,11 @@ app.post("/api/auth/social/google-code", async (req, res) => {
 
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
-      return res.status(400).json({ message: "Google authorization failed." });
+      const reason =
+        (typeof tokenData?.error_description === "string" && tokenData.error_description) ||
+        (typeof tokenData?.error === "string" && tokenData.error) ||
+        "Google authorization failed.";
+      return res.status(400).json({ message: reason });
     }
 
     const userInfoResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
@@ -1441,7 +1445,11 @@ app.post("/api/auth/social/google-code", async (req, res) => {
 
     const userInfo = await userInfoResponse.json();
     if (!userInfoResponse.ok || !userInfo.sub || !userInfo.email) {
-      return res.status(400).json({ message: "Google user profile could not be verified." });
+      const reason =
+        (typeof userInfo?.error_description === "string" && userInfo.error_description) ||
+        (typeof userInfo?.error === "string" && userInfo.error) ||
+        "Google user profile could not be verified.";
+      return res.status(400).json({ message: reason });
     }
 
     if (userInfo.email_verified === false) {
