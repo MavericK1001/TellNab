@@ -9,7 +9,7 @@
     "start:live": "NODE_ENV=production ENV_FILE=config/live/server.env node server/index.js",
     "dev:frontend:local": "vite --mode development",
     "build:frontend:live": "vite build --mode production",
-    "build:support": "rm -rf support-dist && mkdir -p support-dist && cp -R support-site/. support-dist/",
+    "build:support": "vite build --config vite.support.config.ts",
     "smoke:advice": "node scripts/smoke-advice-flow.mjs",
     "smoke:wallet": "node scripts/smoke-wallet-badges-flow.mjs",
     "build": "vite build",
