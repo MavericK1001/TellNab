@@ -1388,79 +1388,11 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.post("/api/auth/social", async (req, res) => {
   try {
-    const data = socialAuthSchema.parse(req.body);
-    const provider = data.provider === "apple" ? SOCIAL_AUTH_PROVIDER.APPLE : SOCIAL_AUTH_PROVIDER.GOOGLE;
-    const providerSubject = (data.providerSubject || data.email || `social-${Date.now()}`).toLowerCase();
-    const providerField = provider === SOCIAL_AUTH_PROVIDER.APPLE ? "appleSub" : "googleSub";
-
-    let user = await prisma.user.findFirst({
-      where: {
-        [providerField]: providerSubject,
-      },
+    socialAuthSchema.parse(req.body);
+    return res.status(410).json({
+      message:
+        "Legacy social login is disabled. Use Google OAuth sign-in via /api/auth/social/google-code.",
     });
-
-    if (!user && data.email) {
-      user = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
-    }
-
-    const safeAvatar = normalizeOptionalText(data.avatarUrl || "");
-    if (safeAvatar && !isValidProfileImageValue(safeAvatar)) {
-      return res.status(400).json({ message: "Invalid avatar image URL" });
-    }
-
-    if (!user) {
-      const randomPassword = await bcrypt.hash(`${provider}:${providerSubject}:${Date.now()}`, 12);
-      const createData = {
-        email: (data.email || socialPlaceholderEmail(provider, providerSubject)).toLowerCase(),
-        name: data.name || socialFallbackName(provider),
-        passwordHash: randomPassword,
-        hasPassword: false,
-        authProvider: provider,
-        avatarUrl: safeAvatar,
-        role: ROLES.MEMBER,
-        isActive: true,
-        [providerField]: providerSubject,
-      };
-
-      user = await prisma.user.create({ data: createData });
-    } else {
-      if (!user.isActive) {
-        return res.status(403).json({ message: "Account suspended" });
-      }
-
-      const updateData = {
-        authProvider: provider,
-      };
-
-      if (!user[providerField]) {
-        updateData[providerField] = providerSubject;
-      }
-
-      if (safeAvatar && !user.avatarUrl) {
-        updateData.avatarUrl = safeAvatar;
-      }
-
-      if (data.name && user.name !== data.name) {
-        updateData.name = data.name;
-      }
-
-      if (Object.keys(updateData).length > 0) {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: updateData,
-        });
-      }
-    }
-
-    const token = createToken(user);
-    res.cookie("tn_auth", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 12,
-    });
-
-    return res.json({ user: sanitizeUser(user), token });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
