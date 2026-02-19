@@ -2,19 +2,33 @@ import axios from "axios";
 import { mockFeed } from "../data/mockData";
 import {
   AdminUser,
+  AdminAuditLog,
+  AdminGroupItem,
+  AdminOverview,
   AdviceComment,
+  AdviceBoostCheckout,
   AdviceItem,
   AdvicePost,
   AdviceStatus,
   AuthResponse,
   AuthUser,
+  BadgeDefinition,
+  CategoryItem,
   ConversationSummary,
+  GroupJoinRequest,
+  GroupSummary,
+  GroupMember,
   HomeOverview,
   NotificationItem,
+  ModerationActivityItem,
+  ModerationGroupRequest,
   PrivateMessage,
   SearchUser,
+  UserBadge,
   UserProfile,
   UserRole,
+  WalletOverview,
+  WalletSnapshot,
 } from "../types";
 
 const DEFAULT_API_BASE_URL =
@@ -221,7 +235,126 @@ export async function updateAdminUserStatus(id: string, isActive: boolean): Prom
   return response.data.user;
 }
 
-export async function createAdvice(payload: { title: string; body: string }): Promise<AdviceItem> {
+export async function getWalletOverview(): Promise<WalletOverview> {
+  const response = await api.get<WalletOverview>("/wallet");
+  return response.data;
+}
+
+export async function mockWalletTopup(amountCents: number): Promise<{
+  wallet: WalletSnapshot;
+  message: string;
+}> {
+  const response = await api.post<{ wallet: WalletSnapshot; message: string }>("/wallet/topup/mock", {
+    amountCents,
+  });
+  return response.data;
+}
+
+export async function getMyBadges(): Promise<{ catalog: BadgeDefinition[]; awards: UserBadge[] }> {
+  const response = await api.get<{ catalog: BadgeDefinition[]; awards: UserBadge[] }>("/badges");
+  return response.data;
+}
+
+export async function getAdminBadges(): Promise<BadgeDefinition[]> {
+  const response = await api.get<{ badges: BadgeDefinition[] }>("/admin/badges");
+  return response.data.badges;
+}
+
+export async function adminAssignBadge(payload: {
+  userId: string;
+  badgeKey: string;
+  reason: string;
+}): Promise<UserBadge> {
+  const response = await api.post<{ award: UserBadge }>("/admin/badges/assign", payload);
+  return response.data.award;
+}
+
+export async function adminAdjustWallet(payload: {
+  userId: string;
+  balanceType: "PAID" | "EARNED";
+  amountCents: number;
+  reason: string;
+}): Promise<{ wallet: WalletSnapshot }> {
+  const response = await api.post<{ wallet: WalletSnapshot }>("/admin/wallet/adjustments", payload);
+  return response.data;
+}
+
+export async function getAdminAuditLogs(limit = 60): Promise<AdminAuditLog[]> {
+  const response = await api.get<{ logs: AdminAuditLog[] }>("/admin/audit-logs", {
+    params: { limit },
+  });
+  return response.data.logs;
+}
+
+export async function getAdminOverview(): Promise<AdminOverview> {
+  const response = await api.get<AdminOverview>("/admin/overview");
+  return response.data;
+}
+
+export async function listAdminCategories(): Promise<CategoryItem[]> {
+  const response = await api.get<{ categories: CategoryItem[] }>("/admin/categories");
+  return response.data.categories;
+}
+
+export async function createAdminCategory(payload: {
+  name: string;
+  slug?: string;
+  description?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+}): Promise<CategoryItem> {
+  const response = await api.post<{ category: CategoryItem }>("/admin/categories", payload);
+  return response.data.category;
+}
+
+export async function updateAdminCategory(
+  id: string,
+  payload: {
+    name?: string;
+    slug?: string;
+    description?: string | null;
+    isActive?: boolean;
+    sortOrder?: number;
+  },
+): Promise<CategoryItem> {
+  const response = await api.patch<{ category: CategoryItem }>(`/admin/categories/${id}`, payload);
+  return response.data.category;
+}
+
+export async function listAdminGroups(): Promise<AdminGroupItem[]> {
+  const response = await api.get<{ groups: AdminGroupItem[] }>("/admin/groups");
+  return response.data.groups;
+}
+
+export async function updateAdminGroup(
+  id: string,
+  payload: {
+    name?: string;
+    description?: string | null;
+    isActive?: boolean;
+    ownerId?: string;
+  },
+): Promise<GroupSummary> {
+  const response = await api.patch<{ group: GroupSummary }>(`/admin/groups/${id}`, payload);
+  return response.data.group;
+}
+
+export async function listAdminGroupModerationActions(
+  id: string,
+  limit = 80,
+): Promise<ModerationActivityItem[]> {
+  const response = await api.get<{ actions: ModerationActivityItem[] }>(`/admin/groups/${id}/moderation-actions`, {
+    params: { limit },
+  });
+  return response.data.actions;
+}
+
+export async function createAdvice(payload: {
+  title: string;
+  body: string;
+  categoryId?: string;
+  groupId?: string;
+}): Promise<AdviceItem> {
   try {
     const data = await postWithFallback<{ advice: AdviceItem }>("/advice", payload);
     return data.advice;
@@ -272,11 +405,82 @@ export async function createAdvice(payload: { title: string; body: string }): Pr
   }
 }
 
-export async function listAdvice(status?: AdviceStatus): Promise<AdviceItem[]> {
+export async function listAdvice(
+  status?: AdviceStatus,
+  options?: { categoryId?: string; groupId?: string },
+): Promise<AdviceItem[]> {
   const response = await api.get<{ advices: AdviceItem[] }>("/advice", {
-    params: status ? { status } : undefined,
+    params: {
+      ...(status ? { status } : {}),
+      ...(options?.categoryId ? { categoryId: options.categoryId } : {}),
+      ...(options?.groupId ? { groupId: options.groupId } : {}),
+    },
   });
   return response.data.advices;
+}
+
+export async function listCategories(): Promise<CategoryItem[]> {
+  const response = await api.get<{ categories: CategoryItem[] }>("/categories");
+  return response.data.categories;
+}
+
+export async function listGroups(): Promise<GroupSummary[]> {
+  const response = await api.get<{ groups: GroupSummary[] }>("/groups");
+  return response.data.groups;
+}
+
+export async function createGroup(payload: {
+  name: string;
+  description?: string;
+  visibility: "PUBLIC" | "PRIVATE";
+}): Promise<GroupSummary> {
+  const response = await api.post<{ group: GroupSummary }>("/groups", payload);
+  return response.data.group;
+}
+
+export async function getGroupDetail(
+  groupId: string,
+): Promise<{ group: GroupSummary; members: GroupMember[]; pendingRequests: number }> {
+  const response = await api.get<{ group: GroupSummary; members: GroupMember[]; pendingRequests: number }>(
+    `/groups/${groupId}`,
+  );
+  return response.data;
+}
+
+export async function joinGroup(groupId: string, message?: string): Promise<{ status: string; requestId?: string }> {
+  const response = await api.post<{ status: string; requestId?: string }>(`/groups/${groupId}/join`, {
+    message,
+  });
+  return response.data;
+}
+
+export async function leaveGroup(groupId: string): Promise<void> {
+  await api.post(`/groups/${groupId}/leave`);
+}
+
+export async function listGroupJoinRequests(groupId: string): Promise<GroupJoinRequest[]> {
+  const response = await api.get<{ requests: GroupJoinRequest[] }>(`/groups/${groupId}/join-requests`);
+  return response.data.requests;
+}
+
+export async function approveGroupJoinRequest(groupId: string, requestId: string, reason?: string): Promise<void> {
+  await api.post(`/groups/${groupId}/join-requests/${requestId}/approve`, { reason });
+}
+
+export async function rejectGroupJoinRequest(groupId: string, requestId: string, reason?: string): Promise<void> {
+  await api.post(`/groups/${groupId}/join-requests/${requestId}/reject`, { reason });
+}
+
+export async function listModerationGroupRequests(): Promise<ModerationGroupRequest[]> {
+  const response = await api.get<{ requests: ModerationGroupRequest[] }>("/moderation/group-requests");
+  return response.data.requests;
+}
+
+export async function listModerationActivity(limit = 80): Promise<ModerationActivityItem[]> {
+  const response = await api.get<{ actions: ModerationActivityItem[] }>("/moderation/activity", {
+    params: { limit },
+  });
+  return response.data.actions;
 }
 
 export async function listMyAdvice(): Promise<AdviceItem[]> {
@@ -313,6 +517,11 @@ export async function followAdviceThread(adviceId: string): Promise<void> {
 
 export async function unfollowAdviceThread(adviceId: string): Promise<void> {
   await api.delete(`/advice/${adviceId}/follow`);
+}
+
+export async function createAdviceBoostCheckout(adviceId: string): Promise<AdviceBoostCheckout> {
+  const response = await api.post<AdviceBoostCheckout>(`/advice/${adviceId}/boost/checkout`, {});
+  return response.data;
 }
 
 export async function moderationQueue(status: AdviceStatus = "PENDING"): Promise<AdviceItem[]> {

@@ -5,6 +5,7 @@ import Button from "../components/Button";
 import Card from "../components/Card";
 import {
   addAdviceComment,
+  createAdviceBoostCheckout,
   createAdvice,
   followAdviceThread,
   getAdviceDetail,
@@ -39,6 +40,7 @@ export default function AdviceCenter() {
   const [followedIds, setFollowedIds] = useState<string[]>([]);
   const [watchlist, setWatchlist] = useState<AdviceItem[]>([]);
   const [followActionId, setFollowActionId] = useState<string | null>(null);
+  const [boostActionId, setBoostActionId] = useState<string | null>(null);
 
   useSeo({
     title: "Advice Threads - Ask and Discuss Real Decisions | TellNab",
@@ -48,6 +50,10 @@ export default function AdviceCenter() {
   });
 
   const canModerate = user?.role === "ADMIN" || user?.role === "MODERATOR";
+  const boostPriceUsd = Number(import.meta.env.VITE_BOOST_PRICE_USD || 4.99);
+  const boostDurationDays = Number(
+    import.meta.env.VITE_BOOST_DURATION_DAYS || 3,
+  );
 
   const selectedAdvice = useMemo(
     () => adviceList.find((item) => item.id === selectedAdviceId) || null,
@@ -259,6 +265,30 @@ export default function AdviceCenter() {
     }
   }
 
+  async function onBoost(adviceId: string) {
+    try {
+      setBoostActionId(adviceId);
+      await createAdviceBoostCheckout(adviceId);
+      setSubmitIsError(false);
+      setSubmitMessage(
+        "Boost activated. Your thread is prioritized in listing order.",
+      );
+      await loadAdvice();
+    } catch (err) {
+      setSubmitIsError(true);
+      if (
+        isAxiosError(err) &&
+        typeof err.response?.data?.message === "string"
+      ) {
+        setSubmitMessage(err.response.data.message);
+        return;
+      }
+      setSubmitMessage("Boost checkout failed. Please try again.");
+    } finally {
+      setBoostActionId(null);
+    }
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <section className="space-y-4 lg:col-span-2">
@@ -333,6 +363,11 @@ export default function AdviceCenter() {
               >
                 <p className="text-base font-semibold text-white">
                   {item.title}
+                  {item.isBoostActive ? (
+                    <span className="ml-2 rounded-full bg-rose-500/20 px-2 py-0.5 text-xs text-rose-200">
+                      Boosted
+                    </span>
+                  ) : null}
                   {item.isFeatured ? (
                     <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-200">
                       Featured
@@ -350,22 +385,47 @@ export default function AdviceCenter() {
                 </div>
 
                 {user ? (
-                  <button
-                    type="button"
-                    onClick={() => void onToggleFollow(item.id)}
-                    disabled={followActionId === item.id}
-                    className={`mt-3 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                      followedIds.includes(item.id)
-                        ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-200"
-                        : "border-violet-300/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
-                    } ${followActionId === item.id ? "opacity-70" : ""}`}
-                  >
-                    {followActionId === item.id
-                      ? "Updating..."
-                      : followedIds.includes(item.id)
-                      ? "Following"
-                      : "Follow thread"}
-                  </button>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void onToggleFollow(item.id)}
+                      disabled={followActionId === item.id}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                        followedIds.includes(item.id)
+                          ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-200"
+                          : "border-violet-300/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
+                      } ${followActionId === item.id ? "opacity-70" : ""}`}
+                    >
+                      {followActionId === item.id
+                        ? "Updating..."
+                        : followedIds.includes(item.id)
+                        ? "Following"
+                        : "Follow thread"}
+                    </button>
+                    {item.author?.id === user.id &&
+                    item.status === "APPROVED" ? (
+                      <button
+                        type="button"
+                        onClick={() => void onBoost(item.id)}
+                        disabled={
+                          boostActionId === item.id || item.isBoostActive
+                        }
+                        className={`rounded-lg border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20 ${
+                          boostActionId === item.id || item.isBoostActive
+                            ? "cursor-not-allowed opacity-70"
+                            : ""
+                        }`}
+                      >
+                        {item.isBoostActive
+                          ? "Boost active"
+                          : boostActionId === item.id
+                          ? "Boosting..."
+                          : `Boost $${boostPriceUsd.toFixed(
+                              2,
+                            )}/${boostDurationDays}d`}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </button>
             ))}
@@ -391,6 +451,39 @@ export default function AdviceCenter() {
                 <p className="mt-2 text-xs text-amber-200">
                   This thread is locked by moderators.
                 </p>
+              ) : null}
+              {selectedAdvice.isBoostActive ? (
+                <p className="mt-2 text-xs text-rose-200">
+                  Boost active until{" "}
+                  {selectedAdvice.boostExpiresAt
+                    ? new Date(selectedAdvice.boostExpiresAt).toLocaleString()
+                    : "soon"}
+                  .
+                </p>
+              ) : null}
+              {user && selectedAdvice.author?.id === user.id ? (
+                <button
+                  type="button"
+                  onClick={() => void onBoost(selectedAdvice.id)}
+                  disabled={
+                    boostActionId === selectedAdvice.id ||
+                    selectedAdvice.isBoostActive
+                  }
+                  className={`mt-2 rounded-lg border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20 ${
+                    boostActionId === selectedAdvice.id ||
+                    selectedAdvice.isBoostActive
+                      ? "cursor-not-allowed opacity-70"
+                      : ""
+                  }`}
+                >
+                  {selectedAdvice.isBoostActive
+                    ? "Boost active"
+                    : boostActionId === selectedAdvice.id
+                    ? "Boosting..."
+                    : `Boost this thread for $${boostPriceUsd.toFixed(
+                        2,
+                      )}/${boostDurationDays}d`}
+                </button>
               ) : null}
 
               <div className="mt-4 space-y-2">

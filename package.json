@@ -10,6 +10,7 @@
     "dev:frontend:local": "vite --mode development",
     "build:frontend:live": "vite build --mode production",
     "smoke:advice": "node scripts/smoke-advice-flow.mjs",
+    "smoke:wallet": "node scripts/smoke-wallet-badges-flow.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.tsx",

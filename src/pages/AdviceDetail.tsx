@@ -4,6 +4,7 @@ import Card from "../components/Card";
 import Button from "../components/Button";
 import {
   addAdviceComment,
+  createAdviceBoostCheckout,
   followAdviceThread,
   getAdviceDetail,
   unfollowAdviceThread,
@@ -20,6 +21,12 @@ export default function AdviceDetail() {
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<AdviceComment | null>(null);
   const [followPending, setFollowPending] = useState(false);
+  const [boostPending, setBoostPending] = useState(false);
+  const [boostMessage, setBoostMessage] = useState<string | null>(null);
+  const boostPriceUsd = Number(import.meta.env.VITE_BOOST_PRICE_USD || 4.99);
+  const boostDurationDays = Number(
+    import.meta.env.VITE_BOOST_DURATION_DAYS || 3,
+  );
 
   useSeo({
     title: advice
@@ -105,6 +112,22 @@ export default function AdviceDetail() {
     }
   }
 
+  async function onBoost() {
+    if (!id || !user || !advice) return;
+
+    try {
+      setBoostPending(true);
+      setBoostMessage(null);
+      await createAdviceBoostCheckout(id);
+      setBoostMessage("Boost activated successfully.");
+      await load();
+    } catch {
+      setBoostMessage("Boost checkout failed. Please try again.");
+    } finally {
+      setBoostPending(false);
+    }
+  }
+
   function renderComments(parentId: string | null, depth = 0): React.ReactNode {
     const children = comments.filter(
       (comment) => (comment.parentId || null) === parentId,
@@ -185,6 +208,40 @@ export default function AdviceDetail() {
         </div>
         {advice.isLocked ? (
           <p className="mt-2 text-xs text-amber-200">Thread is locked.</p>
+        ) : null}
+        {advice.isBoostActive ? (
+          <p className="mt-2 text-xs text-rose-200">
+            Boost active until{" "}
+            {advice.boostExpiresAt
+              ? new Date(advice.boostExpiresAt).toLocaleString()
+              : "soon"}
+            .
+          </p>
+        ) : null}
+        {user && advice.author?.id === user.id ? (
+          <div className="mt-3">
+            <button
+              type="button"
+              disabled={boostPending || advice.isBoostActive || advice.isLocked}
+              onClick={() => void onBoost()}
+              className={`rounded-lg border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20 ${
+                boostPending || advice.isBoostActive || advice.isLocked
+                  ? "cursor-not-allowed opacity-70"
+                  : ""
+              }`}
+            >
+              {advice.isBoostActive
+                ? "Boost active"
+                : boostPending
+                ? "Boosting..."
+                : `Boost thread for $${boostPriceUsd.toFixed(
+                    2,
+                  )}/${boostDurationDays}d`}
+            </button>
+            {boostMessage ? (
+              <p className="mt-2 text-xs text-slate-300">{boostMessage}</p>
+            ) : null}
+          </div>
         ) : null}
       </Card>
 

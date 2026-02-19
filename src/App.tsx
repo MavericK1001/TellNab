@@ -7,6 +7,7 @@ import {
   AdviceDetail,
   Ask,
   Feed,
+  Groups,
   Home,
   Login,
   MessagingCenter,
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/ask" element={<Ask />} />
           <Route path="/feed" element={<Feed />} />
+          <Route path="/groups" element={<Groups />} />
           <Route path="/advice" element={<AdviceCenter />} />
           <Route path="/advice/:id" element={<AdviceDetail />} />
           <Route
@@ -60,7 +62,7 @@ export default function App() {
           <Route
             path="/admin"
             element={
-              <ProtectedRoute requireAdmin>
+              <ProtectedRoute allowedRoles={["ADMIN", "MODERATOR"]}>
                 <Admin />
               </ProtectedRoute>
             }

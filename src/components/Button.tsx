@@ -10,6 +10,7 @@ type ButtonProps = {
   to?: string;
   type?: "button" | "submit" | "reset";
   onClick?: () => void;
+  disabled?: boolean;
 };
 
 const base =
@@ -28,8 +29,11 @@ export default function Button({
   to,
   type = "button",
   onClick,
+  disabled = false,
 }: ButtonProps) {
-  const cls = `${base} ${variants[variant]} ${className}`.trim();
+  const cls = `${base} ${variants[variant]} ${
+    disabled ? "cursor-not-allowed opacity-60" : ""
+  } ${className}`.trim();
 
   if (to) {
     return (
@@ -40,7 +44,7 @@ export default function Button({
   }
 
   return (
-    <button type={type} className={cls} onClick={onClick}>
+    <button type={type} className={cls} onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );

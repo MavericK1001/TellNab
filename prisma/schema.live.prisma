@@ -14,6 +14,9 @@ model User {
   passwordHash String
   role         String   @default("MEMBER")
   isActive     Boolean  @default(true)
+  walletPaidCents Int   @default(0)
+  walletEarnedCents Int @default(0)
+  walletLifetimeEarnedCents Int @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -26,6 +29,31 @@ model User {
   sentMessages         Message[]
   adviceFollows        AdviceFollow[]
   notifications        Notification[]
+  boostOrders          AdviceBoostOrder[]
+  walletTransactions   WalletTransaction[]
+  walletActions        WalletTransaction[] @relation("WalletTransactionActor")
+  badges               UserBadge[]
+  badgesAwarded        UserBadge[] @relation("UserBadgeAwarder")
+  adminAuditEntries    AdminAuditLog[] @relation("AdminActor")
+  adminAuditTargets    AdminAuditLog[] @relation("AdminTarget")
+  createdGroups        DiscussionGroup[] @relation("DiscussionGroupOwner")
+  groupMemberships     GroupMembership[]
+  groupJoinRequests    GroupJoinRequest[] @relation("GroupJoinRequester")
+  reviewedJoinRequests GroupJoinRequest[] @relation("GroupJoinReviewer")
+  groupModerationActions GroupModerationAction[]
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  advices Advice[]
 }
 
 model Advice {
@@ -35,7 +63,12 @@ model Advice {
   status      String   @default("PENDING")
   isLocked    Boolean  @default(false)
   isFeatured  Boolean  @default(false)
+  isBoostActive Boolean @default(false)
+  boostActivatedAt DateTime?
+  boostExpiresAt DateTime?
   holdReason  String?
+  categoryId  String?
+  groupId     String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   moderatedAt DateTime?
@@ -46,10 +79,108 @@ model Advice {
   moderatedById String?
   moderatedBy   User? @relation("AdviceModerator", fields: [moderatedById], references: [id])
 
+  category Category? @relation(fields: [categoryId], references: [id])
+  group    DiscussionGroup? @relation(fields: [groupId], references: [id])
+
   comments AdviceComment[]
   actions  AdviceModerationAction[]
   follows  AdviceFollow[]
   notifications Notification[]
+  boostOrders AdviceBoostOrder[]
+}
+
+model DiscussionGroup {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  visibility  String   @default("PUBLIC")
+  isActive    Boolean  @default(true)
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner             User                   @relation("DiscussionGroupOwner", fields: [ownerId], references: [id])
+  memberships       GroupMembership[]
+  joinRequests      GroupJoinRequest[]
+  moderationActions GroupModerationAction[]
+  advices           Advice[]
+}
+
+model GroupMembership {
+  id       String   @id @default(cuid())
+  role     String   @default("MEMBER")
+  isMuted  Boolean  @default(false)
+  joinedAt DateTime @default(now())
+
+  groupId String
+  group   DiscussionGroup @relation(fields: [groupId], references: [id])
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@index([userId, joinedAt])
+}
+
+model GroupJoinRequest {
+  id             String   @id @default(cuid())
+  status         String   @default("PENDING")
+  message        String?
+  decisionReason String?
+  requestedAt    DateTime @default(now())
+  reviewedAt     DateTime?
+
+  groupId String
+  group   DiscussionGroup @relation(fields: [groupId], references: [id])
+
+  requesterId String
+  requester   User @relation("GroupJoinRequester", fields: [requesterId], references: [id])
+
+  reviewedById String?
+  reviewedBy   User? @relation("GroupJoinReviewer", fields: [reviewedById], references: [id])
+
+  @@index([groupId, status, requestedAt])
+  @@unique([groupId, requesterId, status])
+}
+
+model GroupModerationAction {
+  id        String   @id @default(cuid())
+  action    String
+  reason    String?
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  groupId String
+  group   DiscussionGroup @relation(fields: [groupId], references: [id])
+
+  actorId String
+  actor   User @relation(fields: [actorId], references: [id])
+
+  @@index([groupId, createdAt])
+}
+
+model AdviceBoostOrder {
+  id          String   @id @default(cuid())
+  amountCents Int
+  currency    String   @default("USD")
+  status      String   @default("PENDING")
+  provider    String   @default("MOCK")
+  providerRef String?
+  boostDays   Int
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id])
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  @@index([adviceId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 model AdviceFollow {
@@ -150,4 +281,75 @@ model Message {
 
   senderId String
   sender   User @relation(fields: [senderId], references: [id])
+}
+
+model WalletTransaction {
+  id                   String   @id @default(cuid())
+  amountCents          Int
+  balanceType          String
+  direction            String
+  reason               String
+  source               String   @default("SYSTEM")
+  resultingPaidCents   Int
+  resultingEarnedCents Int
+  createdAt            DateTime @default(now())
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  performedById String?
+  performedBy   User? @relation("WalletTransactionActor", fields: [performedById], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([source, createdAt])
+}
+
+model BadgeDefinition {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String
+  icon        String   @default("🏅")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  awards UserBadge[]
+}
+
+model UserBadge {
+  id        String   @id @default(cuid())
+  source    String   @default("AUTO")
+  reason    String?
+  isVisible Boolean  @default(true)
+  awardedAt DateTime @default(now())
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  badgeId String
+  badge   BadgeDefinition @relation(fields: [badgeId], references: [id])
+
+  awardedById String?
+  awardedBy   User? @relation("UserBadgeAwarder", fields: [awardedById], references: [id])
+
+  @@unique([userId, badgeId])
+  @@index([badgeId, awardedAt])
+}
+
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  reason    String
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  adminId String
+  admin   User @relation("AdminActor", fields: [adminId], references: [id])
+
+  targetUserId String?
+  targetUser   User? @relation("AdminTarget", fields: [targetUserId], references: [id])
+
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
 }

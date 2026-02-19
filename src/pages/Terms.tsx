@@ -23,6 +23,18 @@ export default function Terms() {
           <li>No hate speech, discrimination, or targeted abuse.</li>
           <li>Do not share private personal information.</li>
           <li>Advice should be relevant and practical.</li>
+          <li>
+            Paid thread boosts may increase visibility for approved threads, but
+            they are always clearly labeled as boosted.
+          </li>
+          <li>
+            Wallet credits are recorded in an auditable ledger. Promotional,
+            earned, and paid balances may follow different limits.
+          </li>
+          <li>
+            Badges can be earned automatically through activity or assigned by
+            admins with documented reasons and review logs.
+          </li>
           <li>Moderators may remove content that breaks these terms.</li>
         </ul>
       </Card>

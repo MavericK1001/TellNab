@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
-import { listAdvice } from "../services/api";
-import { AdviceItem } from "../types";
+import { listAdvice, listCategories } from "../services/api";
+import { AdviceItem, CategoryItem } from "../types";
 import { useSeo } from "../utils/seo";
 
 export default function Feed() {
@@ -12,6 +12,8 @@ export default function Feed() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [featuredOnly, setFeaturedOnly] = useState(false);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
 
   useSeo({
     title: "Advice Feed - Trending Anonymous Threads | TellNab",
@@ -25,11 +27,17 @@ export default function Feed() {
       .then(setPosts)
       .catch(() => setError("Unable to load feed. Please try again."))
       .finally(() => setLoading(false));
+
+    listCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]));
   }, []);
 
   const filtered = useMemo(() => {
     return posts.filter((post) => {
       if (featuredOnly && !post.isFeatured) return false;
+      if (selectedCategoryId && post.category?.id !== selectedCategoryId)
+        return false;
       if (!query.trim()) return true;
 
       const q = query.toLowerCase();
@@ -39,7 +47,7 @@ export default function Feed() {
         (post.author?.name || "").toLowerCase().includes(q)
       );
     });
-  }, [featuredOnly, posts, query]);
+  }, [featuredOnly, posts, query, selectedCategoryId]);
 
   return (
     <div className="space-y-6">
@@ -49,7 +57,7 @@ export default function Feed() {
       />
 
       <Card>
-        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
+        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto] md:items-center">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -64,6 +72,18 @@ export default function Feed() {
             />
             Featured only
           </label>
+          <select
+            value={selectedCategoryId}
+            onChange={(event) => setSelectedCategoryId(event.target.value)}
+            className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200"
+          >
+            <option value="">All categories</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
           <span className="rounded-lg border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200">
             {loading ? "Loading…" : `${filtered.length} threads`}
           </span>
@@ -96,6 +116,16 @@ export default function Feed() {
                     {post.isFeatured ? (
                       <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-200">
                         Featured
+                      </span>
+                    ) : null}
+                    {post.category?.name ? (
+                      <span className="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200">
+                        {post.category.name}
+                      </span>
+                    ) : null}
+                    {post.isBoostActive ? (
+                      <span className="rounded-full border border-rose-300/20 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-200">
+                        Boosted
                       </span>
                     ) : null}
                     {post.isLocked ? (
@@ -145,7 +175,7 @@ export default function Feed() {
             </h3>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
               <p>• Source: approved advice threads</p>
-              <p>• Sorted: featured first, latest next</p>
+              <p>• Sorted: boosted first, featured next, latest after</p>
               <p>• Access: public feed, open thread details</p>
             </div>
           </Card>

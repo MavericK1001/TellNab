@@ -1,12 +1,20 @@
 import React, { FormEvent, useState } from "react";
 import { isAxiosError } from "axios";
 import Button from "../components/Button";
-import { createAdvice } from "../services/api";
+import { createAdvice, listCategories } from "../services/api";
+import { CategoryItem } from "../types";
 import { useSeo } from "../utils/seo";
 
 export default function Ask() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+
+  React.useEffect(() => {
+    listCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
 
   useSeo({
     title: "Ask for Advice - Post Your Dilemma | TellNab",
@@ -23,16 +31,15 @@ export default function Ask() {
     setStatus(null);
 
     const title = String(formData.get("title") || "");
-    const category = String(formData.get("category") || "Career");
+    const categoryId = String(formData.get("categoryId") || "");
     const question = String(formData.get("question") || "");
     const anonymous = formData.get("anonymous") === "on";
 
     try {
       await createAdvice({
         title,
-        body: `[Category: ${category}]\n[Anonymous: ${
-          anonymous ? "Yes" : "No"
-        }]\n\n${question}`,
+        body: `[Anonymous: ${anonymous ? "Yes" : "No"}]\n\n${question}`,
+        categoryId: categoryId || undefined,
       });
       setStatus(
         "Question submitted for moderation. You can track it in Advice.",
@@ -80,14 +87,19 @@ export default function Ask() {
                 Category
               </label>
               <select
-                name="category"
+                name="categoryId"
+                required
                 className="mt-2 block w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-violet-400/50 focus:ring"
               >
-                <option>Career</option>
-                <option>Relationships</option>
-                <option>Money</option>
-                <option>Personal growth</option>
-                <option>Health & lifestyle</option>
+                {categories.length === 0 ? (
+                  <option value="">Loading categories…</option>
+                ) : (
+                  categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
