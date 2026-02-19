@@ -1,8 +1,17 @@
-const API_BASE =
+const PRIMARY_API_BASE =
   window.SUPPORT_API_BASE ||
   (window.location.hostname === "localhost"
     ? "http://127.0.0.1:4000/api"
     : "https://tellnab.onrender.com/api");
+
+const API_BASE_CANDIDATES = Array.from(
+  new Set([
+    PRIMARY_API_BASE,
+    "/api",
+    "https://tellnab.onrender.com/api",
+    "http://127.0.0.1:4000/api",
+  ]),
+);
 
 const form = document.getElementById("support-form");
 const statusEl = document.getElementById("form-status");
@@ -107,18 +116,40 @@ form.addEventListener("submit", async (event) => {
   setStatus("Submitting...", "");
 
   try {
-    const response = await fetch(`${API_BASE}/support/tickets`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    let response = null;
+    let json = {};
+    let lastNetworkError = null;
 
-    const json = await response.json().catch(() => ({}));
+    for (const base of API_BASE_CANDIDATES) {
+      try {
+        response = await fetch(`${base}/support/tickets`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        json = await response.json().catch(() => ({}));
+        if (response.ok) {
+          break;
+        }
+      } catch (error) {
+        lastNetworkError = error;
+      }
+    }
+
+    if (!response) {
+      throw (
+        lastNetworkError ||
+        new Error("Network request failed. Please try again in a moment.")
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(json?.message || "Failed to submit request.");
+      throw new Error(
+        json?.message ||
+          "Failed to submit request. If this persists, check CORS_ORIGINS includes support.tellnab.com.",
+      );
     }
 
     form.reset();
@@ -127,7 +158,15 @@ form.addEventListener("submit", async (event) => {
       "ok",
     );
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : "Something went wrong.", "error");
+    const message =
+      error instanceof Error &&
+      /Failed to fetch|Load failed|NetworkError/i.test(error.message)
+        ? "Request could not reach support API. Please retry. If it keeps failing, backend CORS may still be missing support.tellnab.com."
+        : error instanceof Error
+          ? error.message
+          : "Something went wrong.";
+
+    setStatus(message, "error");
   } finally {
     submitBtn.disabled = false;
   }
