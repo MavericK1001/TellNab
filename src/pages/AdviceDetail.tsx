@@ -6,6 +6,7 @@ import {
   addAdviceComment,
   createAdviceBoostCheckout,
   deleteAdviceCommentAsModerator,
+  deleteMyAdviceComment,
   followAdviceThread,
   getAdviceDetail,
   moderateAdvice,
@@ -37,6 +38,23 @@ export default function AdviceDetail() {
   const boostDurationDays = Number(
     import.meta.env.VITE_BOOST_DURATION_DAYS || 3,
   );
+
+  function parseApiError(err: unknown, fallback: string) {
+    if (typeof err === "object" && err && "response" in err) {
+      const response = (
+        err as {
+          response?: {
+            data?: { message?: string };
+          };
+        }
+      ).response;
+
+      if (response?.data?.message) {
+        return response.data.message;
+      }
+    }
+    return fallback;
+  }
 
   useSeo({
     title: advice
@@ -177,8 +195,11 @@ export default function AdviceDetail() {
     }
   }
 
-  async function onDeleteComment(commentId: string) {
-    if (!id || !isModeratorOrAdmin) return;
+  async function onDeleteComment(comment: AdviceComment) {
+    if (!id || !user) return;
+
+    const isOwner = comment.author.id === user.id;
+    if (!isModeratorOrAdmin && !isOwner) return;
 
     const confirmed = window.confirm(
       "Delete this comment? Any replies under it will also be removed.",
@@ -188,11 +209,15 @@ export default function AdviceDetail() {
     try {
       setModerationPending(true);
       setModerationMessage(null);
-      await deleteAdviceCommentAsModerator(id, commentId);
+      if (isModeratorOrAdmin) {
+        await deleteAdviceCommentAsModerator(id, comment.id);
+      } else {
+        await deleteMyAdviceComment(id, comment.id);
+      }
       setModerationMessage("Comment removed.");
       await load();
-    } catch {
-      setModerationMessage("Failed to remove comment.");
+    } catch (error) {
+      setModerationMessage(parseApiError(error, "Failed to remove comment."));
     } finally {
       setModerationPending(false);
     }
@@ -223,11 +248,11 @@ export default function AdviceDetail() {
               >
                 Reply
               </button>
-              {isModeratorOrAdmin ? (
+              {isModeratorOrAdmin || user.id === comment.author.id ? (
                 <button
                   type="button"
                   disabled={moderationPending}
-                  onClick={() => void onDeleteComment(comment.id)}
+                  onClick={() => void onDeleteComment(comment)}
                   className="text-xs font-semibold text-rose-300 transition hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   Delete

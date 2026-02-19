@@ -501,6 +501,16 @@ export async function addAdviceComment(
   return response.data.comment;
 }
 
+export async function deleteMyAdviceComment(
+  adviceId: string,
+  commentId: string,
+): Promise<{ success: boolean; removedCount: number }> {
+  const response = await api.delete<{ success: boolean; removedCount: number }>(
+    `/advice/${adviceId}/comments/${commentId}`,
+  );
+  return response.data;
+}
+
 export async function listFollowedAdviceIds(): Promise<string[]> {
   const response = await api.get<{ adviceIds: string[] }>("/advice/follows");
   return response.data.adviceIds;

@@ -2170,6 +2170,73 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
   }
 });
 
+app.delete("/api/advice/:adviceId/comments/:commentId", authRequired, async (req, res) => {
+  try {
+    const advice = await prisma.advice.findUnique({ where: { id: req.params.adviceId } });
+    if (!advice) {
+      return res.status(404).json({ message: "Advice not found" });
+    }
+
+    const rootComment = await prisma.adviceComment.findUnique({
+      where: { id: req.params.commentId },
+    });
+
+    if (!rootComment || rootComment.adviceId !== advice.id) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
+
+    if (rootComment.authorId !== req.user.id) {
+      return res.status(403).json({ message: "You can only delete your own comment" });
+    }
+
+    const idsToDelete = [rootComment.id];
+    const levels = [[rootComment.id]];
+    let cursor = [rootComment.id];
+
+    while (cursor.length > 0) {
+      const children = await prisma.adviceComment.findMany({
+        where: {
+          parentId: { in: cursor },
+          adviceId: advice.id,
+        },
+        select: { id: true },
+      });
+
+      if (children.length === 0) {
+        break;
+      }
+
+      const next = children.map((item) => item.id);
+      idsToDelete.push(...next);
+      levels.push(next);
+      cursor = next;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.notification.deleteMany({
+        where: {
+          commentId: { in: idsToDelete },
+        },
+      });
+
+      for (let i = levels.length - 1; i >= 0; i -= 1) {
+        await tx.adviceComment.deleteMany({
+          where: {
+            id: { in: levels[i] },
+          },
+        });
+      }
+    });
+
+    return res.json({
+      success: true,
+      removedCount: idsToDelete.length,
+    });
+  } catch {
+    return res.status(500).json({ message: "Failed to remove comment" });
+  }
+});
+
 app.get("/api/moderation/advice", authRequired, moderatorOrAdminRequired, async (req, res) => {
   const status = String(req.query.status || ADVICE_STATUS.PENDING);
   const finalStatus = Object.values(ADVICE_STATUS).includes(status) ? status : ADVICE_STATUS.PENDING;
@@ -2310,6 +2377,7 @@ app.delete(
       }
 
       const idsToDelete = [rootComment.id];
+      const levels = [[rootComment.id]];
       let cursor = [rootComment.id];
 
       while (cursor.length > 0) {
@@ -2327,6 +2395,7 @@ app.delete(
 
         const next = children.map((item) => item.id);
         idsToDelete.push(...next);
+        levels.push(next);
         cursor = next;
       }
 
@@ -2337,11 +2406,13 @@ app.delete(
           },
         });
 
-        await tx.adviceComment.deleteMany({
-          where: {
-            id: { in: idsToDelete },
-          },
-        });
+        for (let i = levels.length - 1; i >= 0; i -= 1) {
+          await tx.adviceComment.deleteMany({
+            where: {
+              id: { in: levels[i] },
+            },
+          });
+        }
 
         await tx.adviceModerationAction.create({
           data: {
