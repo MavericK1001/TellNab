@@ -155,10 +155,12 @@ export default function AdminWorkspace() {
     ModerationActivityItem[]
   >([]);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
-  const [supportStatusFilter, setSupportStatusFilter] =
-    useState<SupportTicketStatus | "ALL">("OPEN");
-  const [supportPriorityFilter, setSupportPriorityFilter] =
-    useState<SupportTicketPriority | "ALL">("ALL");
+  const [supportStatusFilter, setSupportStatusFilter] = useState<
+    SupportTicketStatus | "ALL"
+  >("OPEN");
+  const [supportPriorityFilter, setSupportPriorityFilter] = useState<
+    SupportTicketPriority | "ALL"
+  >("ALL");
   const [supportSearch, setSupportSearch] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
   const [groupHistory, setGroupHistory] = useState<ModerationActivityItem[]>(
@@ -316,7 +318,11 @@ export default function AdminWorkspace() {
       setError(null);
       const [overviewData] = await Promise.all([getAdminOverview()]);
       setOverview(overviewData);
-      await Promise.all([loadModeration(), loadSupportInbox(), loadAdminOnly()]);
+      await Promise.all([
+        loadModeration(),
+        loadSupportInbox(),
+        loadAdminOnly(),
+      ]);
     } catch (err) {
       const message = parseApiError(
         err,
@@ -661,7 +667,10 @@ export default function AdminWorkspace() {
       setActionLoading(true);
       setError(null);
       await updateAdminSupportTicket(ticketId, payload);
-      await Promise.all([loadSupportInbox(), getAdminOverview().then(setOverview)]);
+      await Promise.all([
+        loadSupportInbox(),
+        getAdminOverview().then(setOverview),
+      ]);
       toast.success(successMessage);
     } catch (err) {
       const message = parseApiError(err, "Failed to update support ticket.");
@@ -678,7 +687,10 @@ export default function AdminWorkspace() {
   ) {
     if (status === "RESOLVED" || status === "CLOSED") {
       const resolutionSummary =
-        window.prompt("Add resolution summary (optional):", ticket.resolutionSummary || "") || undefined;
+        window.prompt(
+          "Add resolution summary (optional):",
+          ticket.resolutionSummary || "",
+        ) || undefined;
       await onUpdateSupportTicket(
         ticket.id,
         { status, resolutionSummary },
@@ -1134,9 +1146,12 @@ export default function AdminWorkspace() {
         {activeSection === "support" ? (
           <>
             <Card>
-              <h2 className="text-xl font-semibold text-white">Support Inbox</h2>
+              <h2 className="text-xl font-semibold text-white">
+                Support Inbox
+              </h2>
               <p className="mt-1 text-sm text-slate-300">
-                Triage support tickets with SLA priorities and resolve/close workflow.
+                Triage support tickets with SLA priorities and resolve/close
+                workflow.
               </p>
 
               <div className="mt-4 grid gap-2 md:grid-cols-[170px_170px_1fr_auto]">
@@ -1223,20 +1238,20 @@ export default function AdminWorkspace() {
                 <div className="mt-2 text-xs text-slate-400">
                   <p>Type: {ticket.type}</p>
                   <p>
-                    First response due: {" "}
+                    First response due:{" "}
                     {ticket.firstResponseDueAt
                       ? new Date(ticket.firstResponseDueAt).toLocaleString()
                       : "Not set"}
                   </p>
                   <p>
-                    First response at: {" "}
+                    First response at:{" "}
                     {ticket.firstResponseAt
                       ? new Date(ticket.firstResponseAt).toLocaleString()
                       : "Pending"}
                   </p>
                   {ticket.pageUrl ? (
                     <p>
-                      Page: {" "}
+                      Page:{" "}
                       <a
                         href={ticket.pageUrl}
                         target="_blank"
@@ -1251,7 +1266,9 @@ export default function AdminWorkspace() {
 
                 {ticket.internalNote ? (
                   <div className="mt-2 rounded-lg border border-white/10 bg-slate-950 p-2 text-xs text-slate-300">
-                    <p className="font-semibold text-slate-200">Internal note</p>
+                    <p className="font-semibold text-slate-200">
+                      Internal note
+                    </p>
                     <p className="mt-1">{ticket.internalNote}</p>
                   </div>
                 ) : null}
@@ -1344,7 +1361,9 @@ export default function AdminWorkspace() {
 
             {supportTickets.length === 0 ? (
               <Card>
-                <p className="text-slate-400">No support tickets match current filters.</p>
+                <p className="text-slate-400">
+                  No support tickets match current filters.
+                </p>
               </Card>
             ) : null}
           </>

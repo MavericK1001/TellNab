@@ -8,9 +8,14 @@ export default function ReportIssueButton() {
     DEFAULT_SUPPORT_URL;
 
   const pageUrl =
-    typeof window !== "undefined" ? window.location.href : "https://tellnab.com";
+    typeof window !== "undefined"
+      ? window.location.href
+      : "https://tellnab.com";
 
-  const href = `${supportBase.replace(/\/$/, "")}/?type=ISSUE&pageUrl=${encodeURIComponent(
+  const href = `${supportBase.replace(
+    /\/$/,
+    "",
+  )}/?type=ISSUE&pageUrl=${encodeURIComponent(
     pageUrl,
   )}&subject=${encodeURIComponent("Issue report")}`;
 
