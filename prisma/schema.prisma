@@ -24,6 +24,8 @@ model User {
   createdConversations Conversation[]           @relation("ConversationCreator")
   conversationLinks   ConversationParticipant[]
   sentMessages        Message[]
+  adviceFollows       AdviceFollow[]
+  notifications       Notification[]
 }
 
 model Advice {
@@ -46,6 +48,21 @@ model Advice {
 
   comments      AdviceComment[]
   actions       AdviceModerationAction[]
+  follows       AdviceFollow[]
+  notifications Notification[]
+}
+
+model AdviceFollow {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id])
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  @@unique([adviceId, userId])
 }
 
 model AdviceComment {
@@ -62,6 +79,27 @@ model AdviceComment {
   parentId   String?
   parent     AdviceComment?  @relation("CommentReplies", fields: [parentId], references: [id])
   replies    AdviceComment[] @relation("CommentReplies")
+  notifications Notification[]
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  adviceId String?
+  advice   Advice? @relation(fields: [adviceId], references: [id])
+
+  commentId String?
+  comment   AdviceComment? @relation(fields: [commentId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 model AdviceModerationAction {

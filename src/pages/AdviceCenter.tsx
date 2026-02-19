@@ -6,20 +6,26 @@ import Card from "../components/Card";
 import {
   addAdviceComment,
   createAdvice,
+  followAdviceThread,
   getAdviceDetail,
   listAdvice,
+  listFollowedAdviceIds,
+  listFollowingAdvice,
   moderateAdvice,
   moderationQueue,
+  unfollowAdviceThread,
   updateAdviceFlags,
 } from "../services/api";
 import { AdviceComment, AdviceItem, AdviceStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
+import { useSeo } from "../utils/seo";
 
 export default function AdviceCenter() {
   const { user } = useAuth();
   const [adviceList, setAdviceList] = useState<AdviceItem[]>([]);
   const [selectedAdviceId, setSelectedAdviceId] = useState<string | null>(null);
   const [selectedComments, setSelectedComments] = useState<AdviceComment[]>([]);
+  const [replyTo, setReplyTo] = useState<AdviceComment | null>(null);
   const [queue, setQueue] = useState<AdviceItem[]>([]);
   const [queueStatus, setQueueStatus] = useState<AdviceStatus>("PENDING");
   const [queueLoading, setQueueLoading] = useState(false);
@@ -30,6 +36,16 @@ export default function AdviceCenter() {
   const [submitIsError, setSubmitIsError] = useState(false);
   const [submittingAdvice, setSubmittingAdvice] = useState(false);
   const submittingAdviceRef = useRef(false);
+  const [followedIds, setFollowedIds] = useState<string[]>([]);
+  const [watchlist, setWatchlist] = useState<AdviceItem[]>([]);
+  const [followActionId, setFollowActionId] = useState<string | null>(null);
+
+  useSeo({
+    title: "Advice Threads - Ask and Discuss Real Decisions | TellNab",
+    description:
+      "Open advice threads, submit your own dilemma, and participate in moderated discussions on TellNab.",
+    path: "/advice",
+  });
 
   const canModerate = user?.role === "ADMIN" || user?.role === "MODERATOR";
 
@@ -43,12 +59,17 @@ export default function AdviceCenter() {
       setLoading(true);
       setError(null);
       setQueueLoading(true);
-      const [liveAdvice, liveQueue] = await Promise.all([
-        listAdvice("APPROVED"),
-        canModerate ? moderationQueue(queueStatus) : Promise.resolve([]),
-      ]);
+      const [liveAdvice, liveQueue, liveFollowIds, liveWatchlist] =
+        await Promise.all([
+          listAdvice("APPROVED"),
+          canModerate ? moderationQueue(queueStatus) : Promise.resolve([]),
+          user ? listFollowedAdviceIds() : Promise.resolve([]),
+          user ? listFollowingAdvice() : Promise.resolve([]),
+        ]);
       setAdviceList(liveAdvice);
       setQueue(liveQueue);
+      setFollowedIds(liveFollowIds);
+      setWatchlist(liveWatchlist);
     } catch {
       setError("Failed to load advice content.");
     } finally {
@@ -60,10 +81,11 @@ export default function AdviceCenter() {
   useEffect(() => {
     loadAdvice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canModerate, queueStatus]);
+  }, [canModerate, queueStatus, user?.id]);
 
   useEffect(() => {
     if (!selectedAdviceId) return;
+    setReplyTo(null);
     getAdviceDetail(selectedAdviceId)
       .then((payload) => setSelectedComments(payload.comments))
       .catch(() => setSelectedComments([]));
@@ -138,13 +160,55 @@ export default function AdviceCenter() {
     const body = String(form.get("body") || "");
 
     try {
-      await addAdviceComment(selectedAdviceId, { body });
+      await addAdviceComment(selectedAdviceId, {
+        body,
+        parentId: replyTo?.id,
+      });
       formElement.reset();
+      setReplyTo(null);
       const detail = await getAdviceDetail(selectedAdviceId);
       setSelectedComments(detail.comments);
     } catch {
       setError("Comment failed. This advice may be locked by moderators.");
     }
+  }
+
+  function renderThreadComments(
+    comments: AdviceComment[],
+    parentId: string | null,
+    depth = 0,
+  ): React.ReactNode {
+    const children = comments.filter(
+      (comment) => (comment.parentId || null) === parentId,
+    );
+
+    if (children.length === 0) {
+      return null;
+    }
+
+    return children.map((comment) => (
+      <div
+        key={comment.id}
+        className={`rounded-lg border border-white/10 bg-slate-950 p-3 ${
+          depth > 0 ? "ml-4 mt-2" : ""
+        }`}
+      >
+        <p className="text-sm text-slate-200">{comment.body}</p>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-400">{comment.author.name}</p>
+          {user ? (
+            <button
+              type="button"
+              onClick={() => setReplyTo(comment)}
+              className="text-xs font-semibold text-violet-300 hover:text-violet-200"
+            >
+              Reply
+            </button>
+          ) : null}
+        </div>
+        {renderThreadComments(comments, comment.id, depth + 1)}
+      </div>
+    ));
   }
 
   async function onModerate(
@@ -170,6 +234,28 @@ export default function AdviceCenter() {
       await loadAdvice();
     } finally {
       setQueueActionId(null);
+    }
+  }
+
+  async function onToggleFollow(adviceId: string) {
+    if (!user) return;
+
+    try {
+      setFollowActionId(adviceId);
+      if (followedIds.includes(adviceId)) {
+        await unfollowAdviceThread(adviceId);
+      } else {
+        await followAdviceThread(adviceId);
+      }
+
+      const [liveFollowIds, liveWatchlist] = await Promise.all([
+        listFollowedAdviceIds(),
+        listFollowingAdvice(),
+      ]);
+      setFollowedIds(liveFollowIds);
+      setWatchlist(liveWatchlist);
+    } finally {
+      setFollowActionId(null);
     }
   }
 
@@ -262,6 +348,25 @@ export default function AdviceCenter() {
                 <div className="mt-2 text-xs text-violet-300">
                   <Link to={`/advice/${item.id}`}>Open full thread →</Link>
                 </div>
+
+                {user ? (
+                  <button
+                    type="button"
+                    onClick={() => void onToggleFollow(item.id)}
+                    disabled={followActionId === item.id}
+                    className={`mt-3 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                      followedIds.includes(item.id)
+                        ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-200"
+                        : "border-violet-300/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
+                    } ${followActionId === item.id ? "opacity-70" : ""}`}
+                  >
+                    {followActionId === item.id
+                      ? "Updating..."
+                      : followedIds.includes(item.id)
+                      ? "Following"
+                      : "Follow thread"}
+                  </button>
+                ) : null}
               </button>
             ))}
             {!loading && adviceList.length === 0 ? (
@@ -289,34 +394,46 @@ export default function AdviceCenter() {
               ) : null}
 
               <div className="mt-4 space-y-2">
-                {selectedComments.map((comment) => (
-                  <div
-                    key={comment.id}
-                    className="rounded-lg border border-white/10 bg-slate-950 p-3"
-                  >
-                    <p className="text-sm text-slate-200">{comment.body}</p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      {comment.author.name}
-                    </p>
-                  </div>
-                ))}
+                {renderThreadComments(selectedComments, null)}
                 {selectedComments.length === 0 ? (
                   <p className="text-xs text-slate-400">No comments yet.</p>
                 ) : null}
               </div>
 
               {user ? (
-                <form className="mt-3 space-y-2" onSubmit={onComment}>
-                  <input
-                    name="body"
-                    required
-                    placeholder="Write a comment/reply"
-                    className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
-                  />
-                  <Button type="submit" variant="secondary">
-                    Add comment
-                  </Button>
-                </form>
+                <>
+                  {replyTo ? (
+                    <div className="mt-3 rounded-lg border border-violet-300/30 bg-violet-500/10 px-3 py-2">
+                      <p className="text-xs text-violet-100">
+                        Replying to{" "}
+                        <span className="font-semibold">
+                          {replyTo.author.name}
+                        </span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setReplyTo(null)}
+                        className="mt-1 text-xs font-semibold text-violet-200 hover:text-violet-100"
+                      >
+                        Cancel reply
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <form className="mt-3 space-y-2" onSubmit={onComment}>
+                    <input
+                      name="body"
+                      required
+                      placeholder={
+                        replyTo ? "Write your reply" : "Write a comment/reply"
+                      }
+                      className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                    />
+                    <Button type="submit" variant="secondary">
+                      {replyTo ? "Reply" : "Add comment"}
+                    </Button>
+                  </form>
+                </>
               ) : null}
             </>
           ) : (
@@ -325,6 +442,52 @@ export default function AdviceCenter() {
             </p>
           )}
         </Card>
+
+        {user ? (
+          <Card>
+            <h3 className="text-lg font-semibold text-white">Your watchlist</h3>
+            <p className="mt-1 text-xs text-slate-400">
+              Followed threads you want to revisit.
+            </p>
+
+            <div className="mt-3 space-y-2">
+              {watchlist.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-lg border border-white/10 bg-slate-950 p-3"
+                >
+                  <p className="line-clamp-1 text-sm font-semibold text-white">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-xs text-slate-300">
+                    {item.body}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <Link
+                      to={`/advice/${item.id}`}
+                      className="text-xs font-semibold text-violet-200 hover:text-violet-100"
+                    >
+                      Open thread
+                    </Link>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-rose-200 hover:text-rose-100"
+                      onClick={() => void onToggleFollow(item.id)}
+                    >
+                      Unfollow
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {watchlist.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  You are not following any thread yet.
+                </p>
+              ) : null}
+            </div>
+          </Card>
+        ) : null}
 
         {canModerate ? (
           <Card>

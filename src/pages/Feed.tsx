@@ -4,6 +4,7 @@ import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
 import { listAdvice } from "../services/api";
 import { AdviceItem } from "../types";
+import { useSeo } from "../utils/seo";
 
 export default function Feed() {
   const [posts, setPosts] = useState<AdviceItem[]>([]);
@@ -11,6 +12,13 @@ export default function Feed() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [featuredOnly, setFeaturedOnly] = useState(false);
+
+  useSeo({
+    title: "Advice Feed - Trending Anonymous Threads | TellNab",
+    description:
+      "Browse approved TellNab advice threads. Explore featured discussions on career, relationships, money, and personal growth.",
+    path: "/feed",
+  });
 
   useEffect(() => {
     listAdvice("APPROVED")

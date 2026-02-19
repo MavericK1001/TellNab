@@ -2,10 +2,18 @@ import React, { FormEvent, useState } from "react";
 import { isAxiosError } from "axios";
 import Button from "../components/Button";
 import { createAdvice } from "../services/api";
+import { useSeo } from "../utils/seo";
 
 export default function Ask() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+
+  useSeo({
+    title: "Ask for Advice - Post Your Dilemma | TellNab",
+    description:
+      "Post your question anonymously and get direct, moderated advice from the TellNab community.",
+    path: "/ask",
+  });
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

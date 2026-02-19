@@ -1,8 +1,16 @@
 import React from "react";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
+import { useSeo } from "../utils/seo";
 
 export default function Terms() {
+  useSeo({
+    title: "Community Terms - TellNab Rules and Safety",
+    description:
+      "Read TellNab community terms and moderation rules for safe, useful, and respectful advice discussions.",
+    path: "/terms",
+  });
+
   return (
     <div className="space-y-6">
       <SectionTitle

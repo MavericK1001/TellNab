@@ -59,6 +59,13 @@ export type AuthResponse = {
 
 export type AdminUser = AuthUser;
 
+export type SearchUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+};
+
 export type AdviceStatus = "PENDING" | "APPROVED" | "HOLD" | "REMOVED";
 
 export type AdviceItem = {
@@ -69,6 +76,8 @@ export type AdviceItem = {
   isLocked: boolean;
   isFeatured: boolean;
   holdReason?: string | null;
+  followCount?: number;
+  isFollowing?: boolean;
   createdAt: string;
   updatedAt: string;
   author?: {
@@ -107,4 +116,15 @@ export type PrivateMessage = {
     id: string;
     name: string;
   };
+};
+
+export type NotificationItem = {
+  id: string;
+  type: "REPLY" | "NEW_COMMENT" | "MODERATION" | string;
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
+  adviceId?: string | null;
+  commentId?: string | null;
 };

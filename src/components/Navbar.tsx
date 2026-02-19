@@ -69,6 +69,12 @@ export default function Navbar() {
             >
               Profile
             </Link>
+            <Link
+              to="/notifications"
+              className="rounded-lg px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white"
+            >
+              Notifications
+            </Link>
             {user?.role === "ADMIN" ? (
               <Link
                 to="/admin"
@@ -167,6 +173,13 @@ export default function Navbar() {
               className="rounded-lg px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10"
             >
               Profile
+            </Link>
+            <Link
+              to="/notifications"
+              onClick={closeMobileMenu}
+              className="rounded-lg px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10"
+            >
+              Notifications
             </Link>
             {user?.role === "ADMIN" ? (
               <Link

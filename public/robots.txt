@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /profile
+Disallow: /messages
+Disallow: /login
+Disallow: /register
+
+Sitemap: https://tellnab.com/sitemap.xml

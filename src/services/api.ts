@@ -10,7 +10,9 @@ import {
   AuthUser,
   ConversationSummary,
   HomeOverview,
+  NotificationItem,
   PrivateMessage,
+  SearchUser,
   UserProfile,
   UserRole,
 } from "../types";
@@ -295,6 +297,24 @@ export async function addAdviceComment(
   return response.data.comment;
 }
 
+export async function listFollowedAdviceIds(): Promise<string[]> {
+  const response = await api.get<{ adviceIds: string[] }>("/advice/follows");
+  return response.data.adviceIds;
+}
+
+export async function listFollowingAdvice(): Promise<AdviceItem[]> {
+  const response = await api.get<{ advices: AdviceItem[] }>("/advice/following");
+  return response.data.advices;
+}
+
+export async function followAdviceThread(adviceId: string): Promise<void> {
+  await api.post(`/advice/${adviceId}/follow`);
+}
+
+export async function unfollowAdviceThread(adviceId: string): Promise<void> {
+  await api.delete(`/advice/${adviceId}/follow`);
+}
+
 export async function moderationQueue(status: AdviceStatus = "PENDING"): Promise<AdviceItem[]> {
   const response = await api.get<{ advices: AdviceItem[] }>("/moderation/advice", {
     params: { status },
@@ -328,6 +348,13 @@ export async function createConversation(recipientId: string): Promise<{ id: str
   return response.data.conversation;
 }
 
+export async function searchUsers(query: string): Promise<SearchUser[]> {
+  const response = await api.get<{ users: SearchUser[] }>("/users/search", {
+    params: { q: query },
+  });
+  return response.data.users;
+}
+
 export async function getConversationMessages(conversationId: string): Promise<PrivateMessage[]> {
   const response = await api.get<{ messages: PrivateMessage[] }>(`/messages/conversations/${conversationId}`);
   return response.data.messages;
@@ -336,4 +363,17 @@ export async function getConversationMessages(conversationId: string): Promise<P
 export async function sendMessage(conversationId: string, body: string): Promise<PrivateMessage> {
   const response = await api.post<{ message: PrivateMessage }>(`/messages/conversations/${conversationId}`, { body });
   return response.data.message;
+}
+
+export async function listNotifications(): Promise<{ notifications: NotificationItem[]; unreadCount: number }> {
+  const response = await api.get<{ notifications: NotificationItem[]; unreadCount: number }>("/notifications");
+  return response.data;
+}
+
+export async function markNotificationRead(id: string, isRead: boolean): Promise<void> {
+  await api.patch(`/notifications/${id}`, { isRead });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await api.patch("/notifications/read-all");
 }

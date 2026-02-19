@@ -5,9 +5,10 @@ import {
   createConversation,
   getConversationMessages,
   getConversations,
+  searchUsers,
   sendMessage,
 } from "../services/api";
-import { ConversationSummary, PrivateMessage } from "../types";
+import { ConversationSummary, PrivateMessage, SearchUser } from "../types";
 import { useAuth } from "../context/AuthContext";
 
 export default function MessagingCenter() {
@@ -18,6 +19,12 @@ export default function MessagingCenter() {
   >(null);
   const [messages, setMessages] = useState<PrivateMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [recipientResults, setRecipientResults] = useState<SearchUser[]>([]);
+  const [selectedRecipient, setSelectedRecipient] = useState<SearchUser | null>(
+    null,
+  );
+  const [searchingUsers, setSearchingUsers] = useState(false);
 
   async function loadConversations() {
     try {
@@ -41,13 +48,38 @@ export default function MessagingCenter() {
       .catch(() => setMessages([]));
   }, [activeConversationId]);
 
+  useEffect(() => {
+    const query = recipientQuery.trim();
+    if (query.length < 2) {
+      setRecipientResults([]);
+      setSearchingUsers(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setSearchingUsers(true);
+      searchUsers(query)
+        .then(setRecipientResults)
+        .catch(() => setRecipientResults([]))
+        .finally(() => setSearchingUsers(false));
+    }, 220);
+
+    return () => window.clearTimeout(timer);
+  }, [recipientQuery]);
+
   async function onCreateConversation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const recipientId = String(form.get("recipientId") || "");
-    const conversation = await createConversation(recipientId);
+    if (!selectedRecipient) {
+      setError("Select a recipient from search results first.");
+      return;
+    }
+
+    const conversation = await createConversation(selectedRecipient.id);
     setActiveConversationId(conversation.id);
     event.currentTarget.reset();
+    setRecipientQuery("");
+    setRecipientResults([]);
+    setSelectedRecipient(null);
     await loadConversations();
   }
 
@@ -81,14 +113,58 @@ export default function MessagingCenter() {
           <h2 className="text-lg font-semibold text-white">
             Start conversation
           </h2>
-          <p className="mt-1 text-xs text-slate-400">Enter recipient user ID</p>
+          <p className="mt-1 text-xs text-slate-400">
+            Search by name or email.
+          </p>
           <form className="mt-3 space-y-2" onSubmit={onCreateConversation}>
             <input
-              name="recipientId"
-              required
-              placeholder="Recipient user ID"
+              value={recipientQuery}
+              onChange={(event) => {
+                setRecipientQuery(event.target.value);
+                setSelectedRecipient(null);
+              }}
+              placeholder="Type at least 2 characters"
               className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
             />
+
+            {selectedRecipient ? (
+              <div className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 px-3 py-2">
+                <p className="text-xs text-emerald-100">
+                  Recipient:{" "}
+                  <span className="font-semibold">
+                    {selectedRecipient.name}
+                  </span>
+                </p>
+                <p className="text-[11px] text-emerald-200/90">
+                  {selectedRecipient.email}
+                </p>
+              </div>
+            ) : null}
+
+            {searchingUsers ? (
+              <p className="text-xs text-slate-400">Searching users…</p>
+            ) : null}
+
+            {!searchingUsers && recipientResults.length > 0 ? (
+              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 p-2">
+                {recipientResults.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedRecipient(candidate);
+                      setRecipientQuery(candidate.name);
+                      setRecipientResults([]);
+                    }}
+                    className="block w-full rounded-lg border border-white/10 px-3 py-2 text-left transition hover:border-violet-300/40 hover:bg-white/5"
+                  >
+                    <p className="text-sm text-white">{candidate.name}</p>
+                    <p className="text-xs text-slate-400">{candidate.email}</p>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             <Button type="submit" variant="secondary">
               Create
             </Button>

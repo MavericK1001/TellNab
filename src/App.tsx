@@ -10,6 +10,7 @@ import {
   Home,
   Login,
   MessagingCenter,
+  Notifications,
   Profile,
   Register,
   Terms,
@@ -43,6 +44,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/notifications"
+            element={
+              <ProtectedRoute>
+                <Notifications />
               </ProtectedRoute>
             }
           />

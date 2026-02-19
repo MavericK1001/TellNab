@@ -10,3 +10,4 @@ export { default as AdviceDetail } from "./AdviceDetail";
 export { default as About } from "./About";
 export { default as MessagingCenter } from "./MessagingCenter";
 export { default as Terms } from "./Terms";
+export { default as Notifications } from "./Notifications";

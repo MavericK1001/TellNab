@@ -32,6 +32,12 @@ const ADVICE_STATUS = {
   REMOVED: "REMOVED",
 };
 
+const NOTIFICATION_TYPES = {
+  REPLY: "REPLY",
+  NEW_COMMENT: "NEW_COMMENT",
+  MODERATION: "MODERATION",
+};
+
 const prisma = new PrismaClient();
 const app = express();
 
@@ -147,6 +153,8 @@ function sanitizeAdvice(advice) {
     isLocked: advice.isLocked,
     isFeatured: advice.isFeatured,
     holdReason: advice.holdReason,
+    followCount: Number(advice.followCount || 0),
+    isFollowing: Boolean(advice.isFollowing),
     createdAt: advice.createdAt,
     updatedAt: advice.updatedAt,
     author: advice.author
@@ -157,6 +165,27 @@ function sanitizeAdvice(advice) {
         }
       : undefined,
   };
+}
+
+function sanitizeNotification(notification) {
+  return {
+    id: notification.id,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body,
+    isRead: notification.isRead,
+    createdAt: notification.createdAt,
+    adviceId: notification.adviceId || null,
+    commentId: notification.commentId || null,
+  };
+}
+
+async function createNotification(data) {
+  try {
+    await prisma.notification.create({ data });
+  } catch {
+    // notifications should not break primary user action
+  }
 }
 
 const registerSchema = z.object({
@@ -215,6 +244,14 @@ const createConversationSchema = z.object({
 
 const createMessageSchema = z.object({
   body: z.string().min(1).max(3000),
+});
+
+const userSearchQuerySchema = z.object({
+  q: z.string().max(80).optional().default(""),
+});
+
+const notificationReadSchema = z.object({
+  isRead: z.boolean(),
 });
 
 app.get("/api/health", (_req, res) => {
@@ -311,6 +348,41 @@ app.get("/api/auth/me", authRequired, (req, res) => {
   return res.json({ user: sanitizeUser(req.user) });
 });
 
+app.get("/api/users/search", authRequired, async (req, res) => {
+  try {
+    const { q } = userSearchQuerySchema.parse({
+      q: typeof req.query.q === "string" ? req.query.q.trim() : "",
+    });
+
+    if (q.length < 2) {
+      return res.json({ users: [] });
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        id: { not: req.user.id },
+        OR: [{ name: { contains: q } }, { email: { contains: q } }],
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+
+    return res.json({ users });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to search users" });
+  }
+});
+
 app.get("/api/profile", authRequired, async (req, res) => {
   try {
     const [asks, replies, featuredThreads, approvedThreads, pendingThreads] = await Promise.all([
@@ -345,6 +417,48 @@ app.get("/api/profile", authRequired, async (req, res) => {
   } catch {
     return res.status(500).json({ message: "Failed to load profile" });
   }
+});
+
+app.get("/api/notifications", authRequired, async (req, res) => {
+  const notifications = await prisma.notification.findMany({
+    where: { userId: req.user.id },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const unreadCount = notifications.reduce((count, item) => count + (item.isRead ? 0 : 1), 0);
+  return res.json({ notifications: notifications.map(sanitizeNotification), unreadCount });
+});
+
+app.patch("/api/notifications/:id", authRequired, async (req, res) => {
+  try {
+    const { isRead } = notificationReadSchema.parse(req.body);
+
+    const notification = await prisma.notification.updateMany({
+      where: { id: req.params.id, userId: req.user.id },
+      data: { isRead },
+    });
+
+    if (!notification.count) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to update notification" });
+  }
+});
+
+app.patch("/api/notifications/read-all", authRequired, async (_req, res) => {
+  await prisma.notification.updateMany({
+    where: { userId: _req.user.id, isRead: false },
+    data: { isRead: true },
+  });
+
+  return res.json({ success: true });
 });
 
 app.get("/api/home/overview", async (_req, res) => {
@@ -492,6 +606,64 @@ app.get("/api/advice/mine", authRequired, async (req, res) => {
   return res.json({ advices: list.map(sanitizeAdvice) });
 });
 
+app.get("/api/advice/follows", authRequired, async (req, res) => {
+  const follows = await prisma.adviceFollow.findMany({
+    where: { userId: req.user.id },
+    select: { adviceId: true },
+  });
+
+  return res.json({ adviceIds: follows.map((item) => item.adviceId) });
+});
+
+app.get("/api/advice/following", authRequired, async (req, res) => {
+  const list = await prisma.advice.findMany({
+    where: {
+      status: ADVICE_STATUS.APPROVED,
+      follows: { some: { userId: req.user.id } },
+    },
+    orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
+    include: { author: true },
+  });
+
+  const withFollow = list.map((advice) => ({ ...advice, isFollowing: true }));
+  return res.json({ advices: withFollow.map(sanitizeAdvice) });
+});
+
+app.post("/api/advice/:id/follow", authRequired, async (req, res) => {
+  const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
+
+  if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
+    return res.status(404).json({ message: "Advice not found" });
+  }
+
+  await prisma.adviceFollow.upsert({
+    where: {
+      adviceId_userId: {
+        adviceId: advice.id,
+        userId: req.user.id,
+      },
+    },
+    update: {},
+    create: {
+      adviceId: advice.id,
+      userId: req.user.id,
+    },
+  });
+
+  return res.status(201).json({ success: true });
+});
+
+app.delete("/api/advice/:id/follow", authRequired, async (req, res) => {
+  await prisma.adviceFollow.deleteMany({
+    where: {
+      adviceId: req.params.id,
+      userId: req.user.id,
+    },
+  });
+
+  return res.json({ success: true });
+});
+
 app.get("/api/advice/:id", async (req, res) => {
   const advice = await prisma.advice.findUnique({
     where: { id: req.params.id },
@@ -512,8 +684,33 @@ app.get("/api/advice/:id", async (req, res) => {
     return res.status(403).json({ message: "Advice not publicly available" });
   }
 
+  const followCount = await prisma.adviceFollow.count({ where: { adviceId: advice.id } });
+
+  let followedByCurrentUser = false;
+  if (req.headers.authorization || req.cookies.tn_auth) {
+    try {
+      const header = req.headers.authorization;
+      const bearer = header && header.startsWith("Bearer ") ? header.slice(7) : null;
+      const token = bearer || req.cookies.tn_auth;
+      if (token) {
+        const payload = jwt.verify(token, JWT_SECRET);
+        const follow = await prisma.adviceFollow.findUnique({
+          where: {
+            adviceId_userId: {
+              adviceId: advice.id,
+              userId: payload.sub,
+            },
+          },
+        });
+        followedByCurrentUser = Boolean(follow);
+      }
+    } catch {
+      followedByCurrentUser = false;
+    }
+  }
+
   return res.json({
-    advice: sanitizeAdvice(advice),
+    advice: sanitizeAdvice({ ...advice, followCount, isFollowing: followedByCurrentUser }),
     comments: advice.comments.map((comment) => ({
       id: comment.id,
       body: comment.body,
@@ -546,6 +743,31 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
       },
       include: { author: true },
     });
+
+    if (data.parentId) {
+      const parent = await prisma.adviceComment.findUnique({ where: { id: data.parentId } });
+      if (parent && parent.authorId !== req.user.id) {
+        await createNotification({
+          userId: parent.authorId,
+          type: NOTIFICATION_TYPES.REPLY,
+          title: "New reply to your comment",
+          body: `${req.user.name} replied in a thread you commented on.`,
+          adviceId: advice.id,
+          commentId: comment.id,
+        });
+      }
+    }
+
+    if (advice.authorId !== req.user.id) {
+      await createNotification({
+        userId: advice.authorId,
+        type: NOTIFICATION_TYPES.NEW_COMMENT,
+        title: "New comment on your advice",
+        body: `${req.user.name} commented on your advice thread.`,
+        adviceId: advice.id,
+        commentId: comment.id,
+      });
+    }
 
     return res.status(201).json({
       comment: {
@@ -601,6 +823,16 @@ app.patch("/api/moderation/advice/:id", authRequired, moderatorOrAdminRequired, 
       },
     });
 
+    if (advice.authorId !== req.user.id) {
+      await createNotification({
+        userId: advice.authorId,
+        type: NOTIFICATION_TYPES.MODERATION,
+        title: "Advice moderation update",
+        body: `Your thread status is now ${advice.status}.`,
+        adviceId: advice.id,
+      });
+    }
+
     return res.json({ advice: sanitizeAdvice(advice) });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -633,6 +865,16 @@ app.patch("/api/moderation/advice/:id/flags", authRequired, moderatorOrAdminRequ
         note: `locked=${String(advice.isLocked)}, featured=${String(advice.isFeatured)}`,
       },
     });
+
+    if (advice.authorId !== req.user.id) {
+      await createNotification({
+        userId: advice.authorId,
+        type: NOTIFICATION_TYPES.MODERATION,
+        title: "Advice moderation flags updated",
+        body: `Thread flags changed: locked=${String(advice.isLocked)}, featured=${String(advice.isFeatured)}.`,
+        adviceId: advice.id,
+      });
+    }
 
     return res.json({ advice: sanitizeAdvice(advice) });
   } catch (error) {

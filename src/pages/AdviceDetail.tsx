@@ -2,9 +2,15 @@ import React, { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import Card from "../components/Card";
 import Button from "../components/Button";
-import { addAdviceComment, getAdviceDetail } from "../services/api";
+import {
+  addAdviceComment,
+  followAdviceThread,
+  getAdviceDetail,
+  unfollowAdviceThread,
+} from "../services/api";
 import { AdviceComment, AdviceItem } from "../types";
 import { useAuth } from "../context/AuthContext";
+import { useSeo } from "../utils/seo";
 
 export default function AdviceDetail() {
   const { id } = useParams();
@@ -12,6 +18,40 @@ export default function AdviceDetail() {
   const [advice, setAdvice] = useState<AdviceItem | null>(null);
   const [comments, setComments] = useState<AdviceComment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<AdviceComment | null>(null);
+  const [followPending, setFollowPending] = useState(false);
+
+  useSeo({
+    title: advice
+      ? `${advice.title} | TellNab Advice Thread`
+      : "Advice Thread | TellNab",
+    description: advice
+      ? advice.body.slice(0, 155)
+      : "Read real advice thread discussions on TellNab.",
+    path: id ? `/advice/${id}` : "/advice",
+    structuredData:
+      advice && id
+        ? {
+            "@context": "https://schema.org",
+            "@type": "DiscussionForumPosting",
+            headline: advice.title,
+            articleBody: advice.body,
+            datePublished: advice.createdAt,
+            dateModified: advice.updatedAt,
+            author: {
+              "@type": "Person",
+              name: advice.author?.name || "TellNab Member",
+            },
+            commentCount: comments.length,
+            mainEntityOfPage: {
+              "@type": "WebPage",
+              "@id": `${
+                import.meta.env.VITE_SITE_URL || "https://tellnab.com"
+              }/advice/${id}`,
+            },
+          }
+        : undefined,
+  });
 
   async function load() {
     if (!id) return;
@@ -40,12 +80,60 @@ export default function AdviceDetail() {
     const body = String(form.get("body") || "");
 
     try {
-      await addAdviceComment(id, { body });
+      await addAdviceComment(id, { body, parentId: replyTo?.id });
       event.currentTarget.reset();
+      setReplyTo(null);
       await load();
     } catch {
       setError("Comment failed. Thread might be locked.");
     }
+  }
+
+  async function onToggleFollow() {
+    if (!id || !user || !advice) return;
+
+    try {
+      setFollowPending(true);
+      if (advice.isFollowing) {
+        await unfollowAdviceThread(id);
+      } else {
+        await followAdviceThread(id);
+      }
+      await load();
+    } finally {
+      setFollowPending(false);
+    }
+  }
+
+  function renderComments(parentId: string | null, depth = 0): React.ReactNode {
+    const children = comments.filter(
+      (comment) => (comment.parentId || null) === parentId,
+    );
+    if (children.length === 0) return null;
+
+    return children.map((comment) => (
+      <div
+        key={comment.id}
+        className={`rounded-lg border border-white/10 bg-slate-950 p-3 ${
+          depth > 0 ? "ml-4 mt-2" : ""
+        }`}
+      >
+        <p className="text-sm text-slate-200">{comment.body}</p>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-400">{comment.author.name}</p>
+          {user ? (
+            <button
+              type="button"
+              onClick={() => setReplyTo(comment)}
+              className="text-xs font-semibold text-violet-300 transition hover:text-violet-200"
+            >
+              Reply
+            </button>
+          ) : null}
+        </div>
+        {renderComments(comment.id, depth + 1)}
+      </div>
+    ));
   }
 
   if (error) {
@@ -72,6 +160,29 @@ export default function AdviceDetail() {
         <p className="mt-2 text-xs text-slate-400">
           by {advice.author?.name || "Unknown"}
         </p>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-slate-400">
+            Followers: {advice.followCount || 0}
+          </p>
+          {user ? (
+            <button
+              type="button"
+              disabled={followPending}
+              onClick={() => void onToggleFollow()}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                advice.isFollowing
+                  ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-200"
+                  : "border-violet-300/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20"
+              } ${followPending ? "opacity-70" : ""}`}
+            >
+              {followPending
+                ? "Updating..."
+                : advice.isFollowing
+                ? "Following"
+                : "Follow thread"}
+            </button>
+          ) : null}
+        </div>
         {advice.isLocked ? (
           <p className="mt-2 text-xs text-amber-200">Thread is locked.</p>
         ) : null}
@@ -80,34 +191,42 @@ export default function AdviceDetail() {
       <Card>
         <h2 className="text-lg font-semibold text-white">Comments</h2>
         <div className="mt-3 space-y-2">
-          {comments.map((comment) => (
-            <div
-              key={comment.id}
-              className="rounded-lg border border-white/10 bg-slate-950 p-3"
-            >
-              <p className="text-sm text-slate-200">{comment.body}</p>
-              <p className="mt-1 text-xs text-slate-400">
-                {comment.author.name}
-              </p>
-            </div>
-          ))}
+          {renderComments(null)}
           {comments.length === 0 ? (
             <p className="text-xs text-slate-400">No comments yet.</p>
           ) : null}
         </div>
 
         {user ? (
-          <form className="mt-4 flex gap-2" onSubmit={onComment}>
-            <input
-              name="body"
-              required
-              placeholder="Write a comment"
-              className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
-            />
-            <Button type="submit" variant="secondary">
-              Comment
-            </Button>
-          </form>
+          <>
+            {replyTo ? (
+              <div className="mt-4 rounded-lg border border-violet-300/30 bg-violet-500/10 px-3 py-2">
+                <p className="text-xs text-violet-100">
+                  Replying to{" "}
+                  <span className="font-semibold">{replyTo.author.name}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setReplyTo(null)}
+                  className="mt-1 text-xs font-semibold text-violet-200 hover:text-violet-100"
+                >
+                  Cancel reply
+                </button>
+              </div>
+            ) : null}
+
+            <form className="mt-4 flex gap-2" onSubmit={onComment}>
+              <input
+                name="body"
+                required
+                placeholder={replyTo ? "Write your reply" : "Write a comment"}
+                className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+              />
+              <Button type="submit" variant="secondary">
+                {replyTo ? "Reply" : "Comment"}
+              </Button>
+            </form>
+          </>
         ) : null}
       </Card>
     </div>

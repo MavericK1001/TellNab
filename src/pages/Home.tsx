@@ -4,12 +4,35 @@ import Button from "../components/Button";
 import Card from "../components/Card";
 import { getHomeOverview, listAdvice } from "../services/api";
 import { AdviceItem, HomeOverview } from "../types";
+import { useSeo } from "../utils/seo";
 
 export default function Home() {
   const [threads, setThreads] = useState<AdviceItem[]>([]);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+
+  useSeo({
+    title: "TellNab - Anonymous Advice Threads for Real Decisions",
+    description:
+      "TellNab is a moderated anonymous advice community for career, relationships, money, and life dilemmas. Ask directly and get actionable answers.",
+    path: "/",
+    structuredData: {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "TellNab",
+      url: `${import.meta.env.VITE_SITE_URL || "https://tellnab.com"}/`,
+      description:
+        "Moderated anonymous advice threads for real life decisions.",
+      potentialAction: {
+        "@type": "SearchAction",
+        target: `${
+          import.meta.env.VITE_SITE_URL || "https://tellnab.com"
+        }/feed?q={search_term_string}`,
+        "query-input": "required name=search_term_string",
+      },
+    },
+  });
 
   const todoRoadmap = useMemo(
     () => [

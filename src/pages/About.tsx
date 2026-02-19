@@ -1,8 +1,16 @@
 import React from "react";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
+import { useSeo } from "../utils/seo";
 
 export default function About() {
+  useSeo({
+    title: "About TellNab - Honest Advice, Strong Moderation",
+    description:
+      "Learn how TellNab combines candid advice with moderation standards to help people make better life decisions.",
+    path: "/about",
+  });
+
   return (
     <div className="space-y-6">
       <SectionTitle
