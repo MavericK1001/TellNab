@@ -137,6 +137,41 @@ export type AdminOverview = {
   } | null;
 };
 
+export type SupportTicketPriority = "URGENT" | "NORMAL" | "LOW";
+
+export type SupportTicketStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "RESOLVED"
+  | "CLOSED";
+
+export type SupportTicket = {
+  id: string;
+  type: "INQUIRY" | "ISSUE" | "SUGGESTION" | string;
+  priority: SupportTicketPriority | string;
+  slaTargetHours: number;
+  slaLabel: string;
+  status: SupportTicketStatus | string;
+  requesterName: string;
+  requesterEmail: string;
+  subject: string;
+  message: string;
+  pageUrl?: string | null;
+  firstResponseDueAt?: string | null;
+  firstResponseAt?: string | null;
+  isSlaBreached?: boolean;
+  internalNote?: string | null;
+  resolutionSummary?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string | null;
+  resolvedBy?: {
+    id: string;
+    name: string;
+    role?: UserRole;
+  } | null;
+};
+
 export type AdminGroupItem = GroupSummary & {
   pendingJoinRequests: number;
   adviceCount: number;

@@ -1,0 +1,17 @@
+<svg width="900" height="520" viewBox="0 0 900 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="520" rx="24" fill="#0B1222"/>
+  <rect x="32" y="32" width="220" height="456" rx="14" fill="#141D35"/>
+  <rect x="68" y="72" width="148" height="14" rx="7" fill="#7C8BFF"/>
+  <rect x="54" y="118" width="176" height="12" rx="6" fill="#96A3D8"/>
+  <rect x="54" y="150" width="176" height="12" rx="6" fill="#96A3D8"/>
+  <rect x="54" y="182" width="176" height="12" rx="6" fill="#96A3D8"/>
+  <rect x="284" y="32" width="584" height="456" rx="14" fill="#141D35"/>
+  <circle cx="364" cy="108" r="34" fill="#7C8BFF"/>
+  <rect x="416" y="82" width="180" height="14" rx="7" fill="#E5EAFF"/>
+  <rect x="416" y="108" width="140" height="10" rx="5" fill="#9AA8DE"/>
+  <rect x="332" y="180" width="488" height="44" rx="10" fill="#0E162C" stroke="#2D3964"/>
+  <rect x="332" y="240" width="488" height="44" rx="10" fill="#0E162C" stroke="#2D3964"/>
+  <rect x="332" y="300" width="488" height="44" rx="10" fill="#0E162C" stroke="#2D3964"/>
+  <rect x="332" y="380" width="158" height="42" rx="10" fill="#5F7DFF"/>
+  <text x="50%" y="490" text-anchor="middle" fill="#9FB0E5" font-family="Arial, sans-serif" font-size="20">Account settings flow</text>
+</svg>

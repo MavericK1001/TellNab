@@ -75,6 +75,18 @@ const SUPPORT_TICKET_STATUS = {
   CLOSED: "CLOSED",
 };
 
+const SUPPORT_TICKET_PRIORITY = {
+  URGENT: "URGENT",
+  NORMAL: "NORMAL",
+  LOW: "LOW",
+};
+
+const SUPPORT_SLA_HOURS = {
+  [SUPPORT_TICKET_PRIORITY.URGENT]: 4,
+  [SUPPORT_TICKET_PRIORITY.NORMAL]: 24,
+  [SUPPORT_TICKET_PRIORITY.LOW]: 72,
+};
+
 const prisma = new PrismaClient();
 const app = express();
 
@@ -1096,6 +1108,52 @@ function normalizeOptionalText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+function getSupportSlaHours(priority) {
+  return SUPPORT_SLA_HOURS[priority] || SUPPORT_SLA_HOURS[SUPPORT_TICKET_PRIORITY.NORMAL];
+}
+
+function getSupportSlaLabel(priority) {
+  const hours = getSupportSlaHours(priority);
+  return hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`;
+}
+
+function serializeSupportTicket(ticket) {
+  const priority = ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
+  const firstResponseDueAt = ticket.firstResponseDueAt || null;
+  const firstResponseAt = ticket.firstResponseAt || null;
+  const isAwaitingFirstResponse = !firstResponseAt;
+  const isSlaBreached = Boolean(
+    isAwaitingFirstResponse &&
+      firstResponseDueAt &&
+      new Date(firstResponseDueAt).getTime() < Date.now() &&
+      ticket.status !== SUPPORT_TICKET_STATUS.RESOLVED &&
+      ticket.status !== SUPPORT_TICKET_STATUS.CLOSED,
+  );
+
+  return {
+    id: ticket.id,
+    type: ticket.type,
+    priority,
+    slaTargetHours: getSupportSlaHours(priority),
+    slaLabel: getSupportSlaLabel(priority),
+    status: ticket.status,
+    requesterName: ticket.requesterName,
+    requesterEmail: ticket.requesterEmail,
+    subject: ticket.subject,
+    message: ticket.message,
+    pageUrl: ticket.pageUrl,
+    firstResponseDueAt,
+    firstResponseAt,
+    isSlaBreached,
+    internalNote: ticket.internalNote,
+    resolutionSummary: ticket.resolutionSummary,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+    resolvedAt: ticket.resolvedAt,
+    resolvedBy: ticket.resolvedBy || null,
+  };
+}
+
 function socialFallbackName(provider) {
   if (provider === SOCIAL_AUTH_PROVIDER.APPLE) {
     return "Apple Member";
@@ -1366,6 +1424,13 @@ const supportTicketCreateSchema = z.object({
     SUPPORT_TICKET_TYPE.ISSUE,
     SUPPORT_TICKET_TYPE.SUGGESTION,
   ]),
+  priority: z
+    .enum([
+      SUPPORT_TICKET_PRIORITY.URGENT,
+      SUPPORT_TICKET_PRIORITY.NORMAL,
+      SUPPORT_TICKET_PRIORITY.LOW,
+    ])
+    .optional(),
   requesterName: z.string().min(2).max(80),
   requesterEmail: z.string().email().max(150),
   subject: z.string().min(5).max(180),
@@ -1381,6 +1446,13 @@ const supportTicketAdminUpdateSchema = z
         SUPPORT_TICKET_STATUS.IN_PROGRESS,
         SUPPORT_TICKET_STATUS.RESOLVED,
         SUPPORT_TICKET_STATUS.CLOSED,
+      ])
+      .optional(),
+    priority: z
+      .enum([
+        SUPPORT_TICKET_PRIORITY.URGENT,
+        SUPPORT_TICKET_PRIORITY.NORMAL,
+        SUPPORT_TICKET_PRIORITY.LOW,
       ])
       .optional(),
     internalNote: z.string().max(1000).nullable().optional(),
@@ -1407,6 +1479,9 @@ app.post("/api/support/tickets", async (req, res) => {
   try {
     const data = supportTicketCreateSchema.parse(req.body || {});
     const safePageUrl = normalizeOptionalText(data.pageUrl);
+    const priority = data.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
+    const slaHours = getSupportSlaHours(priority);
+    const firstResponseDueAt = new Date(Date.now() + slaHours * 60 * 60 * 1000);
 
     if (safePageUrl && !safePageUrl.startsWith("http://") && !safePageUrl.startsWith("https://")) {
       return res.status(400).json({ message: "Invalid page URL" });
@@ -1415,12 +1490,14 @@ app.post("/api/support/tickets", async (req, res) => {
     const ticket = await prisma.supportTicket.create({
       data: {
         type: data.type,
+        priority,
         status: SUPPORT_TICKET_STATUS.OPEN,
         requesterName: data.requesterName.trim(),
         requesterEmail: data.requesterEmail.toLowerCase(),
         subject: data.subject.trim(),
         message: data.message.trim(),
         pageUrl: safePageUrl,
+        firstResponseDueAt,
         ipAddress: req.ip || null,
         userAgent: normalizeOptionalText(req.headers["user-agent"]),
       },
@@ -1428,11 +1505,7 @@ app.post("/api/support/tickets", async (req, res) => {
 
     return res.status(201).json({
       message: "Support request received. We will get back to you soon.",
-      ticket: {
-        id: ticket.id,
-        status: ticket.status,
-        createdAt: ticket.createdAt,
-      },
+      ticket: serializeSupportTicket(ticket),
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -1446,6 +1519,8 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
   try {
     const status = typeof req.query.status === "string" ? req.query.status.trim().toUpperCase() : "";
     const type = typeof req.query.type === "string" ? req.query.type.trim().toUpperCase() : "";
+    const priority =
+      typeof req.query.priority === "string" ? req.query.priority.trim().toUpperCase() : "";
     const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const limitRaw = Number(req.query.limit || 100);
     const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 100;
@@ -1458,9 +1533,14 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
       return res.status(400).json({ message: "Invalid support ticket type filter" });
     }
 
+    if (priority && !Object.values(SUPPORT_TICKET_PRIORITY).includes(priority)) {
+      return res.status(400).json({ message: "Invalid support ticket priority filter" });
+    }
+
     const where = {
       ...(status ? { status } : {}),
       ...(type ? { type } : {}),
+      ...(priority ? { priority } : {}),
       ...(search
         ? {
             OR: [
@@ -1475,7 +1555,7 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
 
     const tickets = await prisma.supportTicket.findMany({
       where,
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ createdAt: "desc" }],
       take: limit,
       include: {
         resolvedBy: {
@@ -1485,22 +1565,7 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
     });
 
     return res.json({
-      tickets: tickets.map((ticket) => ({
-        id: ticket.id,
-        type: ticket.type,
-        status: ticket.status,
-        requesterName: ticket.requesterName,
-        requesterEmail: ticket.requesterEmail,
-        subject: ticket.subject,
-        message: ticket.message,
-        pageUrl: ticket.pageUrl,
-        internalNote: ticket.internalNote,
-        resolutionSummary: ticket.resolutionSummary,
-        createdAt: ticket.createdAt,
-        updatedAt: ticket.updatedAt,
-        resolvedAt: ticket.resolvedAt,
-        resolvedBy: ticket.resolvedBy,
-      })),
+      tickets: tickets.map((ticket) => serializeSupportTicket(ticket)),
     });
   } catch {
     return res.status(500).json({ message: "Failed to fetch support tickets" });
@@ -1517,13 +1582,26 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
     }
 
     const nextStatus = data.status || existing.status;
+    const nextPriority = data.priority || existing.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
     const shouldMarkResolved =
       nextStatus === SUPPORT_TICKET_STATUS.RESOLVED || nextStatus === SUPPORT_TICKET_STATUS.CLOSED;
+    const shouldMarkFirstResponse =
+      !existing.firstResponseAt &&
+      (nextStatus === SUPPORT_TICKET_STATUS.IN_PROGRESS || shouldMarkResolved);
 
     const updated = await prisma.supportTicket.update({
       where: { id: existing.id },
       data: {
         ...(data.status ? { status: data.status } : {}),
+        ...(data.priority ? { priority: data.priority } : {}),
+        ...(data.priority && !existing.firstResponseAt
+          ? {
+              firstResponseDueAt: new Date(
+                new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
+              ),
+            }
+          : {}),
+        ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
         ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
         ...(data.resolutionSummary !== undefined
           ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
@@ -1540,22 +1618,7 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
     });
 
     return res.json({
-      ticket: {
-        id: updated.id,
-        type: updated.type,
-        status: updated.status,
-        requesterName: updated.requesterName,
-        requesterEmail: updated.requesterEmail,
-        subject: updated.subject,
-        message: updated.message,
-        pageUrl: updated.pageUrl,
-        internalNote: updated.internalNote,
-        resolutionSummary: updated.resolutionSummary,
-        createdAt: updated.createdAt,
-        updatedAt: updated.updatedAt,
-        resolvedAt: updated.resolvedAt,
-        resolvedBy: updated.resolvedBy,
-      },
+      ticket: serializeSupportTicket(updated),
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

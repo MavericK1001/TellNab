@@ -27,6 +27,9 @@ import {
   ModerationGroupRequest,
   PrivateMessage,
   SearchUser,
+  SupportTicket,
+  SupportTicketPriority,
+  SupportTicketStatus,
   UserBadge,
   UserProfile,
   UserRole,
@@ -340,6 +343,38 @@ export async function getAdminAuditLogs(limit = 60): Promise<AdminAuditLog[]> {
 export async function getAdminOverview(): Promise<AdminOverview> {
   const response = await api.get<AdminOverview>("/admin/overview");
   return response.data;
+}
+
+export async function listAdminSupportTickets(options?: {
+  status?: SupportTicketStatus;
+  type?: "INQUIRY" | "ISSUE" | "SUGGESTION";
+  priority?: SupportTicketPriority;
+  q?: string;
+  limit?: number;
+}): Promise<SupportTicket[]> {
+  const response = await api.get<{ tickets: SupportTicket[] }>("/admin/support/tickets", {
+    params: {
+      ...(options?.status ? { status: options.status } : {}),
+      ...(options?.type ? { type: options.type } : {}),
+      ...(options?.priority ? { priority: options.priority } : {}),
+      ...(options?.q ? { q: options.q } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+    },
+  });
+  return response.data.tickets;
+}
+
+export async function updateAdminSupportTicket(
+  id: string,
+  payload: {
+    status?: SupportTicketStatus;
+    priority?: SupportTicketPriority;
+    internalNote?: string | null;
+    resolutionSummary?: string | null;
+  },
+): Promise<SupportTicket> {
+  const response = await api.patch<{ ticket: SupportTicket }>(`/admin/support/tickets/${id}`, payload);
+  return response.data.ticket;
 }
 
 export async function listAdminCategories(): Promise<CategoryItem[]> {

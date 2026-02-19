@@ -7,8 +7,13 @@ This folder is a standalone static support portal intended for deployment at:
 ## Features
 
 - Public support request form
+- Dedicated public status page: `status.html`
 - Supports request types: `INQUIRY`, `ISSUE`, `SUGGESTION`
+- Ticket priorities with SLA labels: `URGENT` (4h), `NORMAL` (24h), `LOW` (72h)
 - Submits to backend endpoint: `/api/support/tickets`
+- Public status section for outages/incidents/maintenance windows
+- Help center article cards with screenshot assets
+- Query-prefill support for in-app report links (`type`, `pageUrl`, `subject`)
 - Includes a "suggestions we can implement" section for product planning
 
 ## Deployment

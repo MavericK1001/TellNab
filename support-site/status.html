@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TellNab Status</title>
+    <meta name="description" content="TellNab public status page for outages, incidents, and maintenance windows." />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <p class="eyebrow">status.tellnab.com • support.tellnab.com/status</p>
+        <h1>TellNab Public Status</h1>
+        <p class="subtitle">Live visibility into incidents, outages, and maintenance windows.</p>
+        <nav class="quick-links">
+          <a href="./index.html">Support Home</a>
+          <a href="#status">Status feed</a>
+        </nav>
+      </header>
+
+      <section class="panel" id="status">
+        <h2>System status feed</h2>
+        <p class="subtle">Operational notices and incident updates.</p>
+        <div id="status-list" class="status-grid"></div>
+      </section>
+    </main>
+
+    <script src="./status.js" type="module"></script>
+  </body>
+</html>

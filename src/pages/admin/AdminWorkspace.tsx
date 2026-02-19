@@ -10,6 +10,7 @@ import {
   getAdminAuditLogs,
   getAdminBadges,
   getAdminOverview,
+  listAdminSupportTickets,
   getAdminUsers,
   listAdminCategories,
   listAdminGroupModerationActions,
@@ -21,6 +22,7 @@ import {
   rejectGroupJoinRequest,
   updateAdminCategory,
   updateAdminGroup,
+  updateAdminSupportTicket,
   updateAdminUserRole,
   updateAdminUserStatus,
   updateAdviceFlags,
@@ -37,6 +39,9 @@ import {
   ModerationActivityItem,
   ModerationAiHintResult,
   ModerationGroupRequest,
+  SupportTicket,
+  SupportTicketPriority,
+  SupportTicketStatus,
   UserRole,
 } from "../../types";
 import { useToast } from "../../context/ToastContext";
@@ -48,6 +53,7 @@ type SectionKey =
   | "moderation"
   | "groupRequests"
   | "activity"
+  | "support"
   | "users"
   | "wallet"
   | "badges"
@@ -67,6 +73,7 @@ const ALL_SECTIONS: SectionItem[] = [
   { key: "moderation", label: "Moderation Queue", icon: "🛡️" },
   { key: "groupRequests", label: "Group Requests", icon: "👥" },
   { key: "activity", label: "Moderation Activity", icon: "🕒" },
+  { key: "support", label: "Support Inbox", icon: "🎫" },
   { key: "users", label: "Users & Roles", icon: "🧩", adminOnly: true },
   { key: "wallet", label: "Wallet Controls", icon: "💳", adminOnly: true },
   { key: "badges", label: "Badge Operations", icon: "🏅", adminOnly: true },
@@ -102,6 +109,29 @@ function badgeClass(isActive: boolean) {
     : "rounded-full border border-white/15 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300";
 }
 
+function priorityBadgeClass(priority: string) {
+  if (priority === "URGENT") {
+    return "rounded-full border border-rose-300/35 bg-rose-500/15 px-2 py-0.5 text-[11px] text-rose-200";
+  }
+  if (priority === "LOW") {
+    return "rounded-full border border-slate-300/20 bg-slate-700/30 px-2 py-0.5 text-[11px] text-slate-200";
+  }
+  return "rounded-full border border-cyan-300/30 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200";
+}
+
+function statusBadgeClass(status: string) {
+  if (status === "OPEN") {
+    return "rounded-full border border-amber-300/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200";
+  }
+  if (status === "IN_PROGRESS") {
+    return "rounded-full border border-violet-300/30 bg-violet-500/10 px-2 py-0.5 text-[11px] text-violet-200";
+  }
+  if (status === "RESOLVED") {
+    return "rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200";
+  }
+  return "rounded-full border border-slate-300/20 bg-slate-700/30 px-2 py-0.5 text-[11px] text-slate-200";
+}
+
 export default function AdminWorkspace() {
   const toast = useToast();
   const { user } = useAuth();
@@ -124,6 +154,12 @@ export default function AdminWorkspace() {
   const [moderationActivity, setModerationActivity] = useState<
     ModerationActivityItem[]
   >([]);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [supportStatusFilter, setSupportStatusFilter] =
+    useState<SupportTicketStatus | "ALL">("OPEN");
+  const [supportPriorityFilter, setSupportPriorityFilter] =
+    useState<SupportTicketPriority | "ALL">("ALL");
+  const [supportSearch, setSupportSearch] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
   const [groupHistory, setGroupHistory] = useState<ModerationActivityItem[]>(
     [],
@@ -172,6 +208,7 @@ export default function AdminWorkspace() {
       moderation: moderationItems.length,
       groupRequests: groupRequests.length,
       activity: moderationActivity.length,
+      support: supportTickets.length,
       users: users.length,
       badges: badges.length,
       categories: categories.length,
@@ -186,6 +223,7 @@ export default function AdminWorkspace() {
       groups.length,
       moderationActivity.length,
       moderationItems.length,
+      supportTickets.length,
       users.length,
     ],
   );
@@ -223,6 +261,17 @@ export default function AdminWorkspace() {
     setModerationItems(queue);
     setGroupRequests(requests);
     setModerationActivity(activity);
+  }
+
+  async function loadSupportInbox() {
+    const tickets = await listAdminSupportTickets({
+      status: supportStatusFilter === "ALL" ? undefined : supportStatusFilter,
+      priority:
+        supportPriorityFilter === "ALL" ? undefined : supportPriorityFilter,
+      q: supportSearch.trim() || undefined,
+      limit: 150,
+    });
+    setSupportTickets(tickets);
   }
 
   async function loadAdminOnly() {
@@ -267,7 +316,7 @@ export default function AdminWorkspace() {
       setError(null);
       const [overviewData] = await Promise.all([getAdminOverview()]);
       setOverview(overviewData);
-      await Promise.all([loadModeration(), loadAdminOnly()]);
+      await Promise.all([loadModeration(), loadSupportInbox(), loadAdminOnly()]);
     } catch (err) {
       const message = parseApiError(
         err,
@@ -303,6 +352,20 @@ export default function AdminWorkspace() {
       .then(setGroupHistory)
       .catch(() => setGroupHistory([]));
   }, [activeSection, isAdmin, selectedGroupId]);
+
+  useEffect(() => {
+    if (activeSection !== "support") {
+      return;
+    }
+
+    void loadSupportInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeSection,
+    supportPriorityFilter,
+    supportSearch,
+    supportStatusFilter,
+  ]);
 
   async function reloadAdminOnlyAndOverview() {
     const [overviewData] = await Promise.all([getAdminOverview()]);
@@ -582,6 +645,53 @@ export default function AdminWorkspace() {
     } finally {
       setActionLoading(false);
     }
+  }
+
+  async function onUpdateSupportTicket(
+    ticketId: string,
+    payload: {
+      status?: SupportTicketStatus;
+      priority?: SupportTicketPriority;
+      internalNote?: string | null;
+      resolutionSummary?: string | null;
+    },
+    successMessage: string,
+  ) {
+    try {
+      setActionLoading(true);
+      setError(null);
+      await updateAdminSupportTicket(ticketId, payload);
+      await Promise.all([loadSupportInbox(), getAdminOverview().then(setOverview)]);
+      toast.success(successMessage);
+    } catch (err) {
+      const message = parseApiError(err, "Failed to update support ticket.");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function onTransitionSupportTicket(
+    ticket: SupportTicket,
+    status: SupportTicketStatus,
+  ) {
+    if (status === "RESOLVED" || status === "CLOSED") {
+      const resolutionSummary =
+        window.prompt("Add resolution summary (optional):", ticket.resolutionSummary || "") || undefined;
+      await onUpdateSupportTicket(
+        ticket.id,
+        { status, resolutionSummary },
+        `Ticket marked ${status.toLowerCase().replace("_", " ")}.`,
+      );
+      return;
+    }
+
+    await onUpdateSupportTicket(
+      ticket.id,
+      { status },
+      `Ticket moved to ${status.toLowerCase().replace("_", " ")}.`,
+    );
   }
 
   if (loading) {
@@ -1018,6 +1128,225 @@ export default function AdminWorkspace() {
                 ) : null}
               </div>
             </Card>
+          </>
+        ) : null}
+
+        {activeSection === "support" ? (
+          <>
+            <Card>
+              <h2 className="text-xl font-semibold text-white">Support Inbox</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                Triage support tickets with SLA priorities and resolve/close workflow.
+              </p>
+
+              <div className="mt-4 grid gap-2 md:grid-cols-[170px_170px_1fr_auto]">
+                <select
+                  className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
+                  value={supportStatusFilter}
+                  onChange={(event) =>
+                    setSupportStatusFilter(
+                      event.target.value as SupportTicketStatus | "ALL",
+                    )
+                  }
+                >
+                  <option value="ALL">All statuses</option>
+                  <option value="OPEN">Open</option>
+                  <option value="IN_PROGRESS">In progress</option>
+                  <option value="RESOLVED">Resolved</option>
+                  <option value="CLOSED">Closed</option>
+                </select>
+
+                <select
+                  className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
+                  value={supportPriorityFilter}
+                  onChange={(event) =>
+                    setSupportPriorityFilter(
+                      event.target.value as SupportTicketPriority | "ALL",
+                    )
+                  }
+                >
+                  <option value="ALL">All priorities</option>
+                  <option value="URGENT">Urgent</option>
+                  <option value="NORMAL">Normal</option>
+                  <option value="LOW">Low</option>
+                </select>
+
+                <input
+                  className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
+                  placeholder="Search name, email, subject, message"
+                  value={supportSearch}
+                  onChange={(event) => setSupportSearch(event.target.value)}
+                />
+
+                <Button
+                  variant="secondary"
+                  disabled={actionLoading}
+                  onClick={() => void loadSupportInbox()}
+                >
+                  Refresh
+                </Button>
+              </div>
+            </Card>
+
+            {supportTickets.map((ticket) => (
+              <Card key={ticket.id}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={statusBadgeClass(ticket.status)}>
+                      {ticket.status}
+                    </span>
+                    <span className={priorityBadgeClass(ticket.priority)}>
+                      {ticket.priority}
+                    </span>
+                    <span className="rounded-full border border-cyan-300/25 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200">
+                      SLA {ticket.slaLabel}
+                    </span>
+                    {ticket.isSlaBreached ? (
+                      <span className="rounded-full border border-rose-300/30 bg-rose-500/15 px-2 py-0.5 text-[11px] text-rose-200">
+                        SLA breached
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    {new Date(ticket.createdAt).toLocaleString()}
+                  </p>
+                </div>
+
+                <h3 className="mt-3 text-lg font-semibold text-white">
+                  {ticket.subject}
+                </h3>
+                <p className="mt-1 text-sm text-slate-300">
+                  {ticket.requesterName} • {ticket.requesterEmail}
+                </p>
+                <p className="mt-2 text-sm text-slate-200">{ticket.message}</p>
+
+                <div className="mt-2 text-xs text-slate-400">
+                  <p>Type: {ticket.type}</p>
+                  <p>
+                    First response due: {" "}
+                    {ticket.firstResponseDueAt
+                      ? new Date(ticket.firstResponseDueAt).toLocaleString()
+                      : "Not set"}
+                  </p>
+                  <p>
+                    First response at: {" "}
+                    {ticket.firstResponseAt
+                      ? new Date(ticket.firstResponseAt).toLocaleString()
+                      : "Pending"}
+                  </p>
+                  {ticket.pageUrl ? (
+                    <p>
+                      Page: {" "}
+                      <a
+                        href={ticket.pageUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-violet-300 underline"
+                      >
+                        {ticket.pageUrl}
+                      </a>
+                    </p>
+                  ) : null}
+                </div>
+
+                {ticket.internalNote ? (
+                  <div className="mt-2 rounded-lg border border-white/10 bg-slate-950 p-2 text-xs text-slate-300">
+                    <p className="font-semibold text-slate-200">Internal note</p>
+                    <p className="mt-1">{ticket.internalNote}</p>
+                  </div>
+                ) : null}
+
+                {ticket.resolutionSummary ? (
+                  <div className="mt-2 rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2 text-xs text-emerald-100">
+                    <p className="font-semibold">Resolution summary</p>
+                    <p className="mt-1">{ticket.resolutionSummary}</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading}
+                    onClick={() =>
+                      void onUpdateSupportTicket(
+                        ticket.id,
+                        {
+                          priority:
+                            ticket.priority === "URGENT"
+                              ? "NORMAL"
+                              : ticket.priority === "NORMAL"
+                              ? "LOW"
+                              : "URGENT",
+                        },
+                        "Ticket priority updated.",
+                      )
+                    }
+                  >
+                    Cycle priority
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading || ticket.status === "IN_PROGRESS"}
+                    onClick={() =>
+                      void onTransitionSupportTicket(ticket, "IN_PROGRESS")
+                    }
+                  >
+                    Mark in progress
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading || ticket.status === "RESOLVED"}
+                    onClick={() =>
+                      void onTransitionSupportTicket(ticket, "RESOLVED")
+                    }
+                  >
+                    Resolve
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading || ticket.status === "CLOSED"}
+                    onClick={() =>
+                      void onTransitionSupportTicket(ticket, "CLOSED")
+                    }
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading || ticket.status === "OPEN"}
+                    onClick={() =>
+                      void onTransitionSupportTicket(ticket, "OPEN")
+                    }
+                  >
+                    Re-open
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={actionLoading}
+                    onClick={() => {
+                      const note =
+                        window.prompt(
+                          "Add/update internal note:",
+                          ticket.internalNote || "",
+                        ) || "";
+                      void onUpdateSupportTicket(
+                        ticket.id,
+                        { internalNote: note || null },
+                        "Internal note updated.",
+                      );
+                    }}
+                  >
+                    Add note
+                  </Button>
+                </div>
+              </Card>
+            ))}
+
+            {supportTickets.length === 0 ? (
+              <Card>
+                <p className="text-slate-400">No support tickets match current filters.</p>
+              </Card>
+            ) : null}
           </>
         ) : null}
 

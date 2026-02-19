@@ -54,12 +54,15 @@ model User {
 model SupportTicket {
   id                String   @id @default(cuid())
   type              String
+  priority          String   @default("NORMAL")
   status            String   @default("OPEN")
   requesterName     String
   requesterEmail    String
   subject           String
   message           String
   pageUrl           String?
+  firstResponseDueAt DateTime?
+  firstResponseAt   DateTime?
   ipAddress         String?
   userAgent         String?
   internalNote      String?
@@ -72,6 +75,7 @@ model SupportTicket {
   resolvedBy   User? @relation("SupportTicketResolver", fields: [resolvedById], references: [id])
 
   @@index([status, createdAt])
+  @@index([priority, status, createdAt])
   @@index([type, createdAt])
   @@index([requesterEmail, createdAt])
 }

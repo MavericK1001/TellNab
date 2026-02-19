@@ -104,6 +104,8 @@ npm run build:support
   - `POST /api/support/tickets` (public)
   - `GET /api/admin/support/tickets` (moderator/admin)
   - `PATCH /api/admin/support/tickets/:id` (moderator/admin)
+- Ticket priority + SLA labels are supported (`URGENT` 4h, `NORMAL` 24h, `LOW` 72h)
+- Main app includes an in-app "Report issue" button (set `VITE_SUPPORT_SITE_URL` if needed)
 
 ## Security notes
 

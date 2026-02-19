@@ -1,0 +1,13 @@
+<svg width="900" height="520" viewBox="0 0 900 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="520" rx="24" fill="#0B1222"/>
+  <rect x="38" y="38" width="824" height="444" rx="16" fill="#141D35"/>
+  <rect x="74" y="82" width="440" height="34" rx="10" fill="#0D162C" stroke="#30406F"/>
+  <rect x="74" y="132" width="752" height="164" rx="12" fill="#0D162C" stroke="#30406F"/>
+  <rect x="74" y="316" width="130" height="34" rx="8" fill="#1B2749"/>
+  <rect x="218" y="316" width="130" height="34" rx="8" fill="#1B2749"/>
+  <rect x="362" y="316" width="130" height="34" rx="8" fill="#1B2749"/>
+  <rect x="74" y="378" width="230" height="44" rx="10" fill="#5F7DFF"/>
+  <rect x="326" y="378" width="230" height="44" rx="10" fill="#27355E"/>
+  <rect x="578" y="378" width="248" height="44" rx="10" fill="#27355E"/>
+  <text x="50%" y="490" text-anchor="middle" fill="#9FB0E5" font-family="Arial, sans-serif" font-size="20">Posting and moderation workflow</text>
+</svg>

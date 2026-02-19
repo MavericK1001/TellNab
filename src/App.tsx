@@ -19,6 +19,7 @@ import {
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ReportIssueButton from "./components/ReportIssueButton";
 
 export default function App() {
   return (
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/terms" element={<Terms />} />
         </Routes>
       </main>
+      <ReportIssueButton />
       <Footer />
     </div>
   );

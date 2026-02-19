@@ -18,9 +18,49 @@
         <p class="subtitle">
           Submit inquiries, report issues, or share suggestions. Our team tracks every request.
         </p>
+        <nav class="quick-links">
+          <a href="./status.html">Status page</a>
+          <a href="#status">Status</a>
+          <a href="#help">Help center</a>
+          <a href="#contact">Contact support</a>
+        </nav>
       </header>
 
-      <section class="panel">
+      <section class="panel" id="status">
+        <h2>Public system status</h2>
+        <p class="subtle">Outages, incidents, and maintenance windows.</p>
+        <div id="status-list" class="status-grid"></div>
+      </section>
+
+      <section class="panel" id="help">
+        <h2>Help center</h2>
+        <p class="subtle">Common account and posting workflows with screenshots.</p>
+        <div class="help-grid">
+          <article class="help-item">
+            <img src="./assets/screenshots/account-settings.svg" alt="Account settings screenshot" />
+            <h3>Fix account sign-in issues</h3>
+            <p>
+              Check email spelling, reset password, and verify social sign-in provider from your profile settings.
+            </p>
+          </article>
+          <article class="help-item">
+            <img src="./assets/screenshots/posting-workflow.svg" alt="Posting workflow screenshot" />
+            <h3>Why my thread is pending</h3>
+            <p>
+              New advice threads pass moderation before going public. Keep title/body clear to speed approval.
+            </p>
+          </article>
+          <article class="help-item">
+            <img src="./assets/screenshots/report-flow.svg" alt="Issue reporting screenshot" />
+            <h3>Report a website problem</h3>
+            <p>
+              Use in-app “Report issue” or this form. Include affected URL and exact steps to reproduce.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel" id="contact">
         <h2>Contact support</h2>
         <form id="support-form" novalidate>
           <div class="grid two">
@@ -44,9 +84,21 @@
               </select>
             </label>
             <label>
+              Priority (SLA)
+              <select name="priority" id="priority-select" required>
+                <option value="NORMAL">Normal • 24h first response</option>
+                <option value="URGENT">Urgent • 4h first response</option>
+                <option value="LOW">Low • 72h first response</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
               Affected page URL (optional)
               <input name="pageUrl" type="url" maxlength="1000" placeholder="https://tellnab.com/..." />
             </label>
+            <p id="sla-info" class="sla-info" aria-live="polite"></p>
           </div>
 
           <label>
