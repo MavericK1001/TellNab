@@ -80,7 +80,8 @@ const app = express();
 
 const PORT = Number(process.env.SERVER_PORT || 4000);
 const JWT_SECRET = process.env.JWT_SECRET;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "https:";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "";
+const CORS_ORIGINS = process.env.CORS_ORIGINS || "";
 const TOKEN_EXPIRY = process.env.TOKEN_EXPIRY || "12h";
 const LOCAL_ORIGIN_PATTERN = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
@@ -124,6 +125,43 @@ if (!JWT_SECRET || JWT_SECRET.length < 32) {
   throw new Error("Missing/weak JWT_SECRET. Use at least 32 characters.");
 }
 
+function normalizeOrigin(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return null;
+  }
+}
+
+function parseAllowedOrigins(value) {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((item) => normalizeOrigin(item))
+    .filter(Boolean);
+}
+
+const allowedOrigins = new Set([
+  ...parseAllowedOrigins(CORS_ORIGINS),
+]);
+
+const normalizedCorsOrigin = normalizeOrigin(CORS_ORIGIN);
+if (normalizedCorsOrigin) {
+  allowedOrigins.add(normalizedCorsOrigin);
+}
+
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(
@@ -134,7 +172,12 @@ app.use(
         return;
       }
 
-      if (origin === CORS_ORIGIN || LOCAL_ORIGIN_PATTERN.test(origin)) {
+      const normalizedOrigin = normalizeOrigin(origin);
+
+      if (
+        (normalizedOrigin && allowedOrigins.has(normalizedOrigin)) ||
+        LOCAL_ORIGIN_PATTERN.test(origin)
+      ) {
         callback(null, true);
         return;
       }

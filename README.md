@@ -109,8 +109,15 @@ npm run build:support
 
 - Use a long random `JWT_SECRET` (32+ chars minimum)
 - Replace seed admin credentials in `.env` immediately
-- Keep `CORS_ORIGIN` restricted to trusted frontend origins
+- Keep `CORS_ORIGIN` / `CORS_ORIGINS` restricted to trusted frontend origins
 - In production, serve over HTTPS and keep cookies `secure`
+
+CORS example for primary + support subdomain:
+
+```dotenv
+CORS_ORIGIN="https://tellnab.com"
+CORS_ORIGINS="https://tellnab.com,https://support.tellnab.com"
+```
 
 ## Google OAuth setup (required for Google sign-in)
 
