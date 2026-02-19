@@ -1217,6 +1217,12 @@ function serializeSupportTicketMessage(message) {
   };
 }
 
+function buildSupportTranscriptLine(label, text) {
+  const safeText = String(text || "").trim();
+  const safeLabel = String(label || "Support").trim();
+  return `[${new Date().toISOString()}] ${safeLabel}: ${safeText}`;
+}
+
 function socialFallbackName(provider) {
   if (provider === SOCIAL_AUTH_PROVIDER.APPLE) {
     return "Apple Member";
@@ -2057,11 +2063,13 @@ app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired
 
     let messages = [];
     try {
-      const rows = await prisma.supportTicketMessage.findMany({
-        where: { ticketId: fallbackTicket.id },
-        orderBy: { createdAt: "asc" },
-      });
-      messages = rows.map((message) => serializeSupportTicketMessage(message));
+      if (prisma.supportTicketMessage && typeof prisma.supportTicketMessage.findMany === "function") {
+        const rows = await prisma.supportTicketMessage.findMany({
+          where: { ticketId: fallbackTicket.id },
+          orderBy: { createdAt: "asc" },
+        });
+        messages = rows.map((message) => serializeSupportTicketMessage(message));
+      }
     } catch (messageError) {
       console.error("[support] agent ticket detail message fallback failed", messageError);
     }
@@ -2232,16 +2240,22 @@ app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdmi
 
     if (!updated) {
       // Fallback path for partially migrated environments.
+      const canUseMessageModel = Boolean(
+        prisma.supportTicketMessage && typeof prisma.supportTicketMessage.create === "function",
+      );
+
       try {
-        await prisma.supportTicketMessage.create({
-          data: {
-            ticketId: existing.id,
-            senderType: SUPPORT_MESSAGE_SENDER.AGENT,
-            senderName: req.user.name,
-            senderEmail: req.user.email,
-            body: data.message.trim(),
-          },
-        });
+        if (canUseMessageModel) {
+          await prisma.supportTicketMessage.create({
+            data: {
+              ticketId: existing.id,
+              senderType: SUPPORT_MESSAGE_SENDER.AGENT,
+              senderName: req.user.name,
+              senderEmail: req.user.email,
+              body: data.message.trim(),
+            },
+          });
+        }
       } catch (messageError) {
         console.error("[support] agent reply message fallback failed", messageError);
       }
@@ -2257,7 +2271,40 @@ app.post("/api/support/agent/tickets/:id/replies", authRequired, moderatorOrAdmi
         });
       } catch (updateError) {
         console.error("[support] agent reply ticket fallback update failed", updateError);
-        return res.status(500).json({ message: "Failed to send support reply" });
+
+        // Legacy fallback: persist conversation directly into ticket message body.
+        try {
+          const transcriptLine = buildSupportTranscriptLine(
+            `Support (${req.user.name || "Agent"})`,
+            data.message,
+          );
+          updated = await prisma.supportTicket.update({
+            where: { id: existing.id },
+            data: {
+              message: `${String(existing.message || "").trim()}\n\n${transcriptLine}`.trim(),
+            },
+          });
+        } catch (legacyUpdateError) {
+          console.error("[support] agent reply legacy transcript fallback failed", legacyUpdateError);
+          return res.status(500).json({ message: "Failed to send support reply" });
+        }
+      }
+
+      if (!canUseMessageModel) {
+        try {
+          const transcriptLine = buildSupportTranscriptLine(
+            `Support (${req.user.name || "Agent"})`,
+            data.message,
+          );
+          updated = await prisma.supportTicket.update({
+            where: { id: existing.id },
+            data: {
+              message: `${String(existing.message || "").trim()}\n\n${transcriptLine}`.trim(),
+            },
+          });
+        } catch (legacyAppendError) {
+          console.error("[support] agent reply transcript append skipped", legacyAppendError);
+        }
       }
     }
 
@@ -2360,11 +2407,13 @@ app.get("/api/support/tickets/:id/thread", async (req, res) => {
 
     let fallbackMessages = [];
     try {
-      const rows = await prisma.supportTicketMessage.findMany({
-        where: { ticketId: fallbackTicket.id },
-        orderBy: { createdAt: "asc" },
-      });
-      fallbackMessages = rows.map((message) => serializeSupportTicketMessage(message));
+      if (prisma.supportTicketMessage && typeof prisma.supportTicketMessage.findMany === "function") {
+        const rows = await prisma.supportTicketMessage.findMany({
+          where: { ticketId: fallbackTicket.id },
+          orderBy: { createdAt: "asc" },
+        });
+        fallbackMessages = rows.map((message) => serializeSupportTicketMessage(message));
+      }
     } catch (messageError) {
       console.error("[support] thread message fallback failed", messageError);
     }
