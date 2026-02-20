@@ -45,6 +45,23 @@ function getErrorMessage(payload: ApiError | null, fallback: string) {
   return fallback;
 }
 
+function isAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== "object") return false;
+  const user = value as Partial<AuthUser>;
+  return Boolean(
+    typeof user.id === "string" &&
+      typeof user.name === "string" &&
+      typeof user.email === "string" &&
+      typeof user.role === "string",
+  );
+}
+
+function extractAuthUser(payload: unknown): AuthUser | null {
+  if (!payload || typeof payload !== "object") return null;
+  const maybeUser = (payload as { user?: unknown }).user;
+  return isAuthUser(maybeUser) ? maybeUser : null;
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -81,9 +98,14 @@ export default function AppV2() {
 
   const refreshSession = async () => {
     try {
-      const session = await apiRequest<{ user: AuthUser }>("/auth/me");
-      setAuthUser(session.user);
-      return session.user;
+      const session = await apiRequest<unknown>("/auth/me");
+      const user = extractAuthUser(session);
+      if (!user) {
+        setAuthUser(null);
+        return null;
+      }
+      setAuthUser(user);
+      return user;
     } catch {
       setAuthUser(null);
       return null;
@@ -105,13 +127,17 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      const login = await apiRequest<{ user: AuthUser }>("/auth/login", {
+      const login = await apiRequest<unknown>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      setAuthUser(login.user);
+      const user = extractAuthUser(login);
+      if (!user) {
+        throw new Error("Login succeeded but user session payload is invalid.");
+      }
+      setAuthUser(user);
       setTone("ok");
-      setStatus(`Signed in as ${login.user.name}.`);
+      setStatus(`Signed in as ${user.name}.`);
     } catch (error) {
       setTone("error");
       setStatus(error instanceof Error ? error.message : "Login failed.");
@@ -130,11 +156,14 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      const json = await apiRequest<TicketResponse>("/tickets?page=1&page_size=50");
-      setTickets(json.data || []);
-      setSelectedTicketId((prev) => prev || json.data?.[0]?.id || "");
+      const json = await apiRequest<TicketResponse | null>(
+        "/tickets?page=1&page_size=50",
+      );
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      setTickets(rows);
+      setSelectedTicketId((prev) => prev || rows[0]?.id || "");
       setTone("ok");
-      setStatus(`Loaded ${json.data?.length || 0} tickets.`);
+      setStatus(`Loaded ${rows.length} tickets.`);
     } catch (error) {
       setTone("error");
       setStatus(
@@ -170,11 +199,13 @@ export default function AppV2() {
   return (
     <SupportLayout
       sidebar={
-        <div>
+        <div className="support-sidebar-stack">
           <h2>Support 2.0</h2>
           <p>Subdomain API: {API_BASE}</p>
           {authUser ? (
-            <p>Signed in: {authUser.name} ({authUser.role})</p>
+            <p>
+              Signed in: {authUser.name} ({authUser.role})
+            </p>
           ) : (
             <p>Sign in with your normal TellNab account.</p>
           )}
@@ -201,14 +232,16 @@ export default function AppV2() {
             </button>
           </form>
 
-          <button onClick={refreshSession} disabled={loading}>
-            Use existing session
-          </button>
+          <div className="support-btn-row">
+            <button onClick={refreshSession} disabled={loading}>
+              Use existing session
+            </button>
 
-          <button onClick={loadTickets} disabled={loading || !authUser}>
-            {loading ? "Loading..." : "Refresh tickets"}
-          </button>
-          {status ? <p data-tone={tone}>{status}</p> : null}
+            <button onClick={loadTickets} disabled={loading || !authUser}>
+              {loading ? "Loading..." : "Refresh tickets"}
+            </button>
+          </div>
+          {status ? <p className={`status-message ${tone}`}>{status}</p> : null}
         </div>
       }
       topbar={
@@ -229,7 +262,7 @@ export default function AppV2() {
               assignedAgent={selected.assigned_agent_id || null}
               slaDueAt={selected.sla_due_at}
             />
-            <div>
+            <div className="support-btn-row">
               <button
                 onClick={() => handleUpdateStatus("OPEN")}
                 disabled={loading}
