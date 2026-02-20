@@ -16,14 +16,27 @@ class TicketService {
   }
 
   async createTicket({ actorId, body }) {
-    const slaDueAt = await this.getSlaDueAt(body.departmentId, body.priority);
+    let departmentId = body.departmentId;
+
+    if (!departmentId) {
+      const general = await this.prisma.department.findFirst({
+        where: { key: "GENERAL", isActive: true, deletedAt: null },
+        orderBy: { createdAt: "asc" },
+      });
+      if (!general) {
+        throw new Error("support_department_missing");
+      }
+      departmentId = general.id;
+    }
+
+    const slaDueAt = await this.getSlaDueAt(departmentId, body.priority);
 
     const ticket = await this.ticketRepository.create({
       subject: body.subject,
       description: body.description,
       status: "NEW",
       priority: body.priority,
-      departmentId: body.departmentId,
+          departmentId,
       customerId: actorId,
       slaDueAt,
     });
@@ -32,7 +45,7 @@ class TicketService {
       ticketId: ticket.id,
       action: "TICKET_CREATED",
       performedBy: actorId,
-      metadata: JSON.stringify({ priority: body.priority, departmentId: body.departmentId }),
+      metadata: JSON.stringify({ priority: body.priority, departmentId }),
     });
 
     return this.ticketRepository.findById(ticket.id);

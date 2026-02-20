@@ -4,7 +4,7 @@ const createTicketSchema = z.object({
   subject: z.string().min(5).max(180),
   description: z.string().min(10).max(5000),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
-  departmentId: z.string().min(1),
+  departmentId: z.string().min(1).optional(),
 });
 
 const ticketListQuerySchema = z.object({
@@ -139,6 +139,9 @@ class TicketController {
     }
     if (error?.message === "department_scope_required") {
       return res.status(400).json({ message: "department_id is required for your role scope" });
+    }
+    if (error?.message === "support_department_missing") {
+      return res.status(503).json({ message: "Support departments are not seeded yet" });
     }
     return res.status(500).json({ message: "Support module request failed" });
   }

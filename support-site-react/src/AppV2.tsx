@@ -85,9 +85,11 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | null = null;
   let payload: unknown = null;
   let lastError: unknown = null;
+  let lastBase = "";
 
   for (const base of API_BASE_CANDIDATES) {
     try {
+      lastBase = base;
       response = await fetch(`${base}${path}`, {
         ...init,
         headers: {
@@ -116,12 +118,13 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response) {
-    throw (lastError as Error) || new Error("Support API is not reachable.");
+    const networkMessage =
+      lastError instanceof Error ? lastError.message : "Support API is not reachable.";
+    throw new Error(`${networkMessage} (path: ${path})`);
   }
 
-  throw new Error(
-    getErrorMessage(payload as ApiError | null, "Support request failed."),
-  );
+  const fallbackMessage = `Support request failed (${response.status}) via ${lastBase}${path}`;
+  throw new Error(getErrorMessage(payload as ApiError | null, fallbackMessage));
 }
 
 export default function AppV2() {
@@ -133,6 +136,9 @@ export default function AppV2() {
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "ok" | "error">("");
   const [loading, setLoading] = useState(false);
+  const [newSubject, setNewSubject] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newPriority, setNewPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("MEDIUM");
 
   const selected = useMemo(
     () => tickets.find((ticket) => ticket.id === selectedTicketId) || null,
@@ -271,6 +277,45 @@ export default function AppV2() {
     }
   };
 
+  const handleCreateTicket = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (!authUser) {
+      setTone("error");
+      setStatus("Sign in first to create a ticket.");
+      return;
+    }
+
+    if (newSubject.trim().length < 5 || newDescription.trim().length < 10) {
+      setTone("error");
+      setStatus("Subject must be at least 5 and description at least 10 characters.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await apiRequest<{ data: TicketRow }>("/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          subject: newSubject.trim(),
+          description: newDescription.trim(),
+          priority: newPriority,
+        }),
+      });
+      setTone("ok");
+      setStatus("Ticket created successfully.");
+      setNewSubject("");
+      setNewDescription("");
+      setNewPriority("MEDIUM");
+      await loadTickets();
+    } catch (error) {
+      setTone("error");
+      setStatus(error instanceof Error ? error.message : "Failed to create ticket.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <SupportLayout
       sidebar={
@@ -316,13 +361,46 @@ export default function AppV2() {
               {loading ? "Loading..." : "Refresh tickets"}
             </button>
           </div>
+
+          <form onSubmit={handleCreateTicket}>
+            <label>Ticket subject</label>
+            <input
+              value={newSubject}
+              onChange={(event) => setNewSubject(event.target.value)}
+              placeholder="Describe your issue"
+            />
+
+            <label>Priority</label>
+            <select
+              value={newPriority}
+              onChange={(event) => setNewPriority(event.target.value as "LOW" | "MEDIUM" | "HIGH" | "URGENT")}
+            >
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="URGENT">Urgent</option>
+            </select>
+
+            <label>Describe the issue</label>
+            <textarea
+              rows={4}
+              value={newDescription}
+              onChange={(event) => setNewDescription(event.target.value)}
+              placeholder="What happened and what should happen instead?"
+            />
+
+            <button type="submit" disabled={loading || !authUser}>
+              {loading ? "Submitting..." : "Create ticket"}
+            </button>
+          </form>
+
           {status ? <p className={`status-message ${tone}`}>{status}</p> : null}
         </div>
       }
       topbar={
         <div>
           <strong>Support Ticket Console</strong>
-          <p>Using your standard TellNab sign-in session.</p>
+          <p>Members can create tickets here. Agents can manage them from the list.</p>
         </div>
       }
       list={<TicketListTable rows={tickets} onOpen={setSelectedTicketId} />}

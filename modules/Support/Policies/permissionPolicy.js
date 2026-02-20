@@ -37,7 +37,53 @@ const PERMISSION = {
 };
 
 function createPermissionPolicy({ prisma }) {
-  async function getAcl(userId) {
+  function applyFallbackPermissionsFromCoreRole(coreRole, permissions) {
+    const role = String(coreRole || "").toUpperCase();
+
+    if (role === "ADMIN") {
+      Object.values(PERMISSION).forEach((p) => permissions.add(p));
+      return;
+    }
+
+    if (role === "MODERATOR") {
+      [
+        PERMISSION.TICKET_VIEW_ALL,
+        PERMISSION.TICKET_ASSIGN,
+        PERMISSION.TICKET_REASSIGN,
+        PERMISSION.PRIORITY_UPDATE,
+        PERMISSION.SLA_MONITOR,
+        PERMISSION.REPORT_READ,
+        PERMISSION.TICKET_STATUS_UPDATE,
+        PERMISSION.TICKET_REPLY_ASSIGNED,
+        PERMISSION.INTERNAL_NOTE_CREATE,
+      ].forEach((p) => permissions.add(p));
+      return;
+    }
+
+    if (role === "SUPPORT_MEMBER") {
+      [
+        PERMISSION.TICKET_VIEW_ASSIGNED,
+        PERMISSION.TICKET_REPLY_ASSIGNED,
+        PERMISSION.TICKET_STATUS_UPDATE,
+        PERMISSION.INTERNAL_NOTE_CREATE,
+        PERMISSION.ATTACHMENT_UPLOAD,
+        PERMISSION.TICKET_ESCALATE,
+      ].forEach((p) => permissions.add(p));
+      return;
+    }
+
+    // Default member/customer fallback
+    [
+      PERMISSION.TICKET_CREATE,
+      PERMISSION.TICKET_VIEW_OWN,
+      PERMISSION.TICKET_REPLY_OWN,
+      PERMISSION.TICKET_CLOSE_OWN,
+      PERMISSION.FEEDBACK_CREATE,
+      PERMISSION.ATTACHMENT_UPLOAD,
+    ].forEach((p) => permissions.add(p));
+  }
+
+  async function getAcl(userId, coreRole) {
     const rows = await prisma.userRole.findMany({
       where: { userId },
       include: {
@@ -61,6 +107,10 @@ function createPermissionPolicy({ prisma }) {
       }
     }
 
+    if (permissions.size === 0) {
+      applyFallbackPermissionsFromCoreRole(coreRole, permissions);
+    }
+
     return {
       roles,
       permissions,
@@ -71,7 +121,7 @@ function createPermissionPolicy({ prisma }) {
 
   function requirePermission(permission) {
     return async (req, res, next) => {
-      const acl = await getAcl(req.user.id);
+      const acl = await getAcl(req.user.id, req.user.role);
       req.supportAcl = acl;
       if (!acl.hasPermission(permission)) {
         return res.status(403).json({ message: "Forbidden" });
@@ -82,7 +132,7 @@ function createPermissionPolicy({ prisma }) {
 
   function requireAnyPermission(permissions) {
     return async (req, res, next) => {
-      const acl = await getAcl(req.user.id);
+      const acl = await getAcl(req.user.id, req.user.role);
       req.supportAcl = acl;
       const allowed = permissions.some((permission) => acl.hasPermission(permission));
       if (!allowed) {
