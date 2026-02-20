@@ -32,6 +32,8 @@ type AuthUser = {
   role: string;
 };
 
+const SUPPORT_TOKEN_KEY = "tellnab_support_auth_token";
+
 const PRIMARY_API_BASE =
   (window as any).SUPPORT_API_BASE ||
   `${window.location.origin.replace(/\/$/, "")}/api`;
@@ -81,7 +83,19 @@ function extractAuthUser(payload: unknown): AuthUser | null {
   return null;
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+function extractAuthToken(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as {
+    token?: unknown;
+    data?: { token?: unknown };
+  };
+
+  if (typeof root.token === "string" && root.token.trim()) return root.token;
+  if (root.data && typeof root.data.token === "string" && root.data.token.trim()) return root.data.token;
+  return null;
+}
+
+async function apiRequest<T>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> {
   let response: Response | null = null;
   let payload: unknown = null;
   let lastError: unknown = null;
@@ -94,6 +108,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         headers: {
           "content-type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
           ...(init?.headers || {}),
         },
         credentials: "include",
@@ -119,7 +134,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response) {
     const networkMessage =
-      lastError instanceof Error ? lastError.message : "Support API is not reachable.";
+      lastError instanceof Error
+        ? lastError.message
+        : "Support API is not reachable.";
     throw new Error(`${networkMessage} (path: ${path})`);
   }
 
@@ -129,6 +146,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 export default function AppV2() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(
+    () => window.localStorage.getItem(SUPPORT_TOKEN_KEY) || null,
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -138,7 +158,9 @@ export default function AppV2() {
   const [loading, setLoading] = useState(false);
   const [newSubject, setNewSubject] = useState("");
   const [newDescription, setNewDescription] = useState("");
-  const [newPriority, setNewPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("MEDIUM");
+  const [newPriority, setNewPriority] = useState<
+    "LOW" | "MEDIUM" | "HIGH" | "URGENT"
+  >("MEDIUM");
 
   const selected = useMemo(
     () => tickets.find((ticket) => ticket.id === selectedTicketId) || null,
@@ -205,11 +227,20 @@ export default function AppV2() {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), password }),
       });
+
+      const token = extractAuthToken(login);
+      if (token) {
+        setAuthToken(token);
+        window.localStorage.setItem(SUPPORT_TOKEN_KEY, token);
+      }
+
       let user = extractAuthUser(login);
       if (!user) {
         // Some hosts/proxies may return a minimal success payload.
         // Cookie is still set, so confirm via /auth/me before failing.
-        user = await refreshSession();
+        user = await (token
+          ? apiRequest<unknown>("/auth/me", undefined, token).then(extractAuthUser)
+          : refreshSession());
       }
       if (!user) {
         throw new Error(
@@ -239,6 +270,8 @@ export default function AppV2() {
     try {
       const json = await apiRequest<TicketResponse | null>(
         "/tickets?page=1&page_size=50",
+        undefined,
+        authToken,
       );
       const rows = Array.isArray(json?.data) ? json.data : [];
       setTickets(rows);
@@ -260,10 +293,14 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      await apiRequest(`/tickets/${encodeURIComponent(selected.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      });
+      await apiRequest(
+        `/tickets/${encodeURIComponent(selected.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus }),
+        },
+        authToken,
+      );
       setTone("ok");
       setStatus(`Ticket updated to ${nextStatus}.`);
       await loadTickets();
@@ -288,20 +325,26 @@ export default function AppV2() {
 
     if (newSubject.trim().length < 5 || newDescription.trim().length < 10) {
       setTone("error");
-      setStatus("Subject must be at least 5 and description at least 10 characters.");
+      setStatus(
+        "Subject must be at least 5 and description at least 10 characters.",
+      );
       return;
     }
 
     setLoading(true);
     try {
-      await apiRequest<{ data: TicketRow }>("/tickets", {
-        method: "POST",
-        body: JSON.stringify({
-          subject: newSubject.trim(),
-          description: newDescription.trim(),
-          priority: newPriority,
-        }),
-      });
+      await apiRequest<{ data: TicketRow }>(
+        "/tickets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subject: newSubject.trim(),
+            description: newDescription.trim(),
+            priority: newPriority,
+          }),
+        },
+        authToken,
+      );
       setTone("ok");
       setStatus("Ticket created successfully.");
       setNewSubject("");
@@ -310,7 +353,9 @@ export default function AppV2() {
       await loadTickets();
     } catch (error) {
       setTone("error");
-      setStatus(error instanceof Error ? error.message : "Failed to create ticket.");
+      setStatus(
+        error instanceof Error ? error.message : "Failed to create ticket.",
+      );
     } finally {
       setLoading(false);
     }
@@ -373,7 +418,11 @@ export default function AppV2() {
             <label>Priority</label>
             <select
               value={newPriority}
-              onChange={(event) => setNewPriority(event.target.value as "LOW" | "MEDIUM" | "HIGH" | "URGENT")}
+              onChange={(event) =>
+                setNewPriority(
+                  event.target.value as "LOW" | "MEDIUM" | "HIGH" | "URGENT",
+                )
+              }
             >
               <option value="LOW">Low</option>
               <option value="MEDIUM">Medium</option>
@@ -400,7 +449,10 @@ export default function AppV2() {
       topbar={
         <div>
           <strong>Support Ticket Console</strong>
-          <p>Members can create tickets here. Agents can manage them from the list.</p>
+          <p>
+            Members can create tickets here. Agents can manage them from the
+            list.
+          </p>
         </div>
       }
       list={<TicketListTable rows={tickets} onOpen={setSelectedTicketId} />}

@@ -1,0 +1,1583 @@
+From bac885d27416c1d349e99b0bc8b155d30001fac8 Mon Sep 17 00:00:00 2001
+From: Nabeel Khawar <nabeelkhawar@Nabeels-MacBook-Air.local>
+Date: Thu, 19 Feb 2026 22:52:54 +0500
+Subject: [PATCH 1/2] feat: implement support status/help/SLA and admin inbox
+ workflow
+
+---
+ .env.example                                  |   1 +
+ README.md                                     |   2 +
+ prisma/schema.live.prisma                     |   4 +
+ prisma/schema.prisma                          |   4 +
+ server/index.js                               | 139 ++++++--
+ src/App.tsx                                   |   2 +
+ src/components/ReportIssueButton.tsx          |  28 ++
+ src/pages/admin/AdminWorkspace.tsx            | 331 +++++++++++++++++-
+ src/services/api.ts                           |  35 ++
+ src/types/index.ts                            |  35 ++
+ support-site/README.md                        |   5 +
+ support-site/app.js                           |  77 ++++
+ .../assets/screenshots/account-settings.svg   |  17 +
+ .../assets/screenshots/posting-workflow.svg   |  13 +
+ .../assets/screenshots/report-flow.svg        |  13 +
+ support-site/index.html                       |  54 ++-
+ support-site/status.html                      |  31 ++
+ support-site/status.js                        |  38 ++
+ support-site/styles.css                       | 114 ++++++
+ 19 files changed, 903 insertions(+), 40 deletions(-)
+ create mode 100644 src/components/ReportIssueButton.tsx
+ create mode 100644 support-site/assets/screenshots/account-settings.svg
+ create mode 100644 support-site/assets/screenshots/posting-workflow.svg
+ create mode 100644 support-site/assets/screenshots/report-flow.svg
+ create mode 100644 support-site/status.html
+ create mode 100644 support-site/status.js
+
+diff --git a/.env.example b/.env.example
+index e2c8c2e..63aaacc 100644
+--- a/.env.example
++++ b/.env.example
+@@ -22,3 +22,4 @@ ADMIN_WALLET_MAX_ADJUST_CENTS=10000
+ # Frontend (Vite)
+ VITE_API_BASE_URL="http://127.0.0.1:4000/api"
+ VITE_GOOGLE_CLIENT_ID="replace-with-your-google-web-client-id.apps.googleusercontent.com"
++VITE_SUPPORT_SITE_URL="https://support.tellnab.com"
+diff --git a/README.md b/README.md
+index 4c93f16..35a0b80 100644
+--- a/README.md
++++ b/README.md
+@@ -104,6 +104,8 @@ npm run build:support
+   - `POST /api/support/tickets` (public)
+   - `GET /api/admin/support/tickets` (moderator/admin)
+   - `PATCH /api/admin/support/tickets/:id` (moderator/admin)
++- Ticket priority + SLA labels are supported (`URGENT` 4h, `NORMAL` 24h, `LOW` 72h)
++- Main app includes an in-app "Report issue" button (set `VITE_SUPPORT_SITE_URL` if needed)
+ 
+ ## Security notes
+ 
+diff --git a/prisma/schema.live.prisma b/prisma/schema.live.prisma
+index 0125e45..ea915d5 100644
+--- a/prisma/schema.live.prisma
++++ b/prisma/schema.live.prisma
+@@ -54,12 +54,15 @@ model User {
+ model SupportTicket {
+   id                String   @id @default(cuid())
+   type              String
++  priority          String   @default("NORMAL")
+   status            String   @default("OPEN")
+   requesterName     String
+   requesterEmail    String
+   subject           String
+   message           String
+   pageUrl           String?
++  firstResponseDueAt DateTime?
++  firstResponseAt   DateTime?
+   ipAddress         String?
+   userAgent         String?
+   internalNote      String?
+@@ -72,6 +75,7 @@ model SupportTicket {
+   resolvedBy   User? @relation("SupportTicketResolver", fields: [resolvedById], references: [id])
+ 
+   @@index([status, createdAt])
++  @@index([priority, status, createdAt])
+   @@index([type, createdAt])
+   @@index([requesterEmail, createdAt])
+ }
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index d3abb42..97a2035 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -54,12 +54,15 @@ model User {
+ model SupportTicket {
+   id                String   @id @default(cuid())
+   type              String
++  priority          String   @default("NORMAL")
+   status            String   @default("OPEN")
+   requesterName     String
+   requesterEmail    String
+   subject           String
+   message           String
+   pageUrl           String?
++  firstResponseDueAt DateTime?
++  firstResponseAt   DateTime?
+   ipAddress         String?
+   userAgent         String?
+   internalNote      String?
+@@ -72,6 +75,7 @@ model SupportTicket {
+   resolvedBy   User? @relation("SupportTicketResolver", fields: [resolvedById], references: [id])
+ 
+   @@index([status, createdAt])
++  @@index([priority, status, createdAt])
+   @@index([type, createdAt])
+   @@index([requesterEmail, createdAt])
+ }
+diff --git a/server/index.js b/server/index.js
+index 3b40fc5..2db3732 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -75,6 +75,18 @@ const SUPPORT_TICKET_STATUS = {
+   CLOSED: "CLOSED",
+ };
+ 
++const SUPPORT_TICKET_PRIORITY = {
++  URGENT: "URGENT",
++  NORMAL: "NORMAL",
++  LOW: "LOW",
++};
++
++const SUPPORT_SLA_HOURS = {
++  [SUPPORT_TICKET_PRIORITY.URGENT]: 4,
++  [SUPPORT_TICKET_PRIORITY.NORMAL]: 24,
++  [SUPPORT_TICKET_PRIORITY.LOW]: 72,
++};
++
+ const prisma = new PrismaClient();
+ const app = express();
+ 
+@@ -1096,6 +1108,52 @@ function normalizeOptionalText(value) {
+   return normalized.length > 0 ? normalized : null;
+ }
+ 
++function getSupportSlaHours(priority) {
++  return SUPPORT_SLA_HOURS[priority] || SUPPORT_SLA_HOURS[SUPPORT_TICKET_PRIORITY.NORMAL];
++}
++
++function getSupportSlaLabel(priority) {
++  const hours = getSupportSlaHours(priority);
++  return hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`;
++}
++
++function serializeSupportTicket(ticket) {
++  const priority = ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
++  const firstResponseDueAt = ticket.firstResponseDueAt || null;
++  const firstResponseAt = ticket.firstResponseAt || null;
++  const isAwaitingFirstResponse = !firstResponseAt;
++  const isSlaBreached = Boolean(
++    isAwaitingFirstResponse &&
++      firstResponseDueAt &&
++      new Date(firstResponseDueAt).getTime() < Date.now() &&
++      ticket.status !== SUPPORT_TICKET_STATUS.RESOLVED &&
++      ticket.status !== SUPPORT_TICKET_STATUS.CLOSED,
++  );
++
++  return {
++    id: ticket.id,
++    type: ticket.type,
++    priority,
++    slaTargetHours: getSupportSlaHours(priority),
++    slaLabel: getSupportSlaLabel(priority),
++    status: ticket.status,
++    requesterName: ticket.requesterName,
++    requesterEmail: ticket.requesterEmail,
++    subject: ticket.subject,
++    message: ticket.message,
++    pageUrl: ticket.pageUrl,
++    firstResponseDueAt,
++    firstResponseAt,
++    isSlaBreached,
++    internalNote: ticket.internalNote,
++    resolutionSummary: ticket.resolutionSummary,
++    createdAt: ticket.createdAt,
++    updatedAt: ticket.updatedAt,
++    resolvedAt: ticket.resolvedAt,
++    resolvedBy: ticket.resolvedBy || null,
++  };
++}
++
+ function socialFallbackName(provider) {
+   if (provider === SOCIAL_AUTH_PROVIDER.APPLE) {
+     return "Apple Member";
+@@ -1366,6 +1424,13 @@ const supportTicketCreateSchema = z.object({
+     SUPPORT_TICKET_TYPE.ISSUE,
+     SUPPORT_TICKET_TYPE.SUGGESTION,
+   ]),
++  priority: z
++    .enum([
++      SUPPORT_TICKET_PRIORITY.URGENT,
++      SUPPORT_TICKET_PRIORITY.NORMAL,
++      SUPPORT_TICKET_PRIORITY.LOW,
++    ])
++    .optional(),
+   requesterName: z.string().min(2).max(80),
+   requesterEmail: z.string().email().max(150),
+   subject: z.string().min(5).max(180),
+@@ -1383,6 +1448,13 @@ const supportTicketAdminUpdateSchema = z
+         SUPPORT_TICKET_STATUS.CLOSED,
+       ])
+       .optional(),
++    priority: z
++      .enum([
++        SUPPORT_TICKET_PRIORITY.URGENT,
++        SUPPORT_TICKET_PRIORITY.NORMAL,
++        SUPPORT_TICKET_PRIORITY.LOW,
++      ])
++      .optional(),
+     internalNote: z.string().max(1000).nullable().optional(),
+     resolutionSummary: z.string().max(1000).nullable().optional(),
+   })
+@@ -1407,6 +1479,9 @@ app.post("/api/support/tickets", async (req, res) => {
+   try {
+     const data = supportTicketCreateSchema.parse(req.body || {});
+     const safePageUrl = normalizeOptionalText(data.pageUrl);
++    const priority = data.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
++    const slaHours = getSupportSlaHours(priority);
++    const firstResponseDueAt = new Date(Date.now() + slaHours * 60 * 60 * 1000);
+ 
+     if (safePageUrl && !safePageUrl.startsWith("http://") && !safePageUrl.startsWith("https://")) {
+       return res.status(400).json({ message: "Invalid page URL" });
+@@ -1415,12 +1490,14 @@ app.post("/api/support/tickets", async (req, res) => {
+     const ticket = await prisma.supportTicket.create({
+       data: {
+         type: data.type,
++        priority,
+         status: SUPPORT_TICKET_STATUS.OPEN,
+         requesterName: data.requesterName.trim(),
+         requesterEmail: data.requesterEmail.toLowerCase(),
+         subject: data.subject.trim(),
+         message: data.message.trim(),
+         pageUrl: safePageUrl,
++        firstResponseDueAt,
+         ipAddress: req.ip || null,
+         userAgent: normalizeOptionalText(req.headers["user-agent"]),
+       },
+@@ -1428,11 +1505,7 @@ app.post("/api/support/tickets", async (req, res) => {
+ 
+     return res.status(201).json({
+       message: "Support request received. We will get back to you soon.",
+-      ticket: {
+-        id: ticket.id,
+-        status: ticket.status,
+-        createdAt: ticket.createdAt,
+-      },
++      ticket: serializeSupportTicket(ticket),
+     });
+   } catch (error) {
+     if (error instanceof z.ZodError) {
+@@ -1446,6 +1519,8 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
+   try {
+     const status = typeof req.query.status === "string" ? req.query.status.trim().toUpperCase() : "";
+     const type = typeof req.query.type === "string" ? req.query.type.trim().toUpperCase() : "";
++    const priority =
++      typeof req.query.priority === "string" ? req.query.priority.trim().toUpperCase() : "";
+     const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+     const limitRaw = Number(req.query.limit || 100);
+     const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 100;
+@@ -1458,9 +1533,14 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
+       return res.status(400).json({ message: "Invalid support ticket type filter" });
+     }
+ 
++    if (priority && !Object.values(SUPPORT_TICKET_PRIORITY).includes(priority)) {
++      return res.status(400).json({ message: "Invalid support ticket priority filter" });
++    }
++
+     const where = {
+       ...(status ? { status } : {}),
+       ...(type ? { type } : {}),
++      ...(priority ? { priority } : {}),
+       ...(search
+         ? {
+             OR: [
+@@ -1475,7 +1555,7 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
+ 
+     const tickets = await prisma.supportTicket.findMany({
+       where,
+-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
++      orderBy: [{ createdAt: "desc" }],
+       take: limit,
+       include: {
+         resolvedBy: {
+@@ -1485,22 +1565,7 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
+     });
+ 
+     return res.json({
+-      tickets: tickets.map((ticket) => ({
+-        id: ticket.id,
+-        type: ticket.type,
+-        status: ticket.status,
+-        requesterName: ticket.requesterName,
+-        requesterEmail: ticket.requesterEmail,
+-        subject: ticket.subject,
+-        message: ticket.message,
+-        pageUrl: ticket.pageUrl,
+-        internalNote: ticket.internalNote,
+-        resolutionSummary: ticket.resolutionSummary,
+-        createdAt: ticket.createdAt,
+-        updatedAt: ticket.updatedAt,
+-        resolvedAt: ticket.resolvedAt,
+-        resolvedBy: ticket.resolvedBy,
+-      })),
++      tickets: tickets.map((ticket) => serializeSupportTicket(ticket)),
+     });
+   } catch {
+     return res.status(500).json({ message: "Failed to fetch support tickets" });
+@@ -1517,13 +1582,26 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
+     }
+ 
+     const nextStatus = data.status || existing.status;
++    const nextPriority = data.priority || existing.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
+     const shouldMarkResolved =
+       nextStatus === SUPPORT_TICKET_STATUS.RESOLVED || nextStatus === SUPPORT_TICKET_STATUS.CLOSED;
++    const shouldMarkFirstResponse =
++      !existing.firstResponseAt &&
++      (nextStatus === SUPPORT_TICKET_STATUS.IN_PROGRESS || shouldMarkResolved);
+ 
+     const updated = await prisma.supportTicket.update({
+       where: { id: existing.id },
+       data: {
+         ...(data.status ? { status: data.status } : {}),
++        ...(data.priority ? { priority: data.priority } : {}),
++        ...(data.priority && !existing.firstResponseAt
++          ? {
++              firstResponseDueAt: new Date(
++                new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
++              ),
++            }
++          : {}),
++        ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
+         ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
+         ...(data.resolutionSummary !== undefined
+           ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
+@@ -1540,22 +1618,7 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
+     });
+ 
+     return res.json({
+-      ticket: {
+-        id: updated.id,
+-        type: updated.type,
+-        status: updated.status,
+-        requesterName: updated.requesterName,
+-        requesterEmail: updated.requesterEmail,
+-        subject: updated.subject,
+-        message: updated.message,
+-        pageUrl: updated.pageUrl,
+-        internalNote: updated.internalNote,
+-        resolutionSummary: updated.resolutionSummary,
+-        createdAt: updated.createdAt,
+-        updatedAt: updated.updatedAt,
+-        resolvedAt: updated.resolvedAt,
+-        resolvedBy: updated.resolvedBy,
+-      },
++      ticket: serializeSupportTicket(updated),
+     });
+   } catch (error) {
+     if (error instanceof z.ZodError) {
+diff --git a/src/App.tsx b/src/App.tsx
+index 868ce5c..47742ba 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -19,6 +19,7 @@ import {
+ import Navbar from "./components/Navbar";
+ import Footer from "./components/Footer";
+ import ProtectedRoute from "./components/ProtectedRoute";
++import ReportIssueButton from "./components/ReportIssueButton";
+ 
+ export default function App() {
+   return (
+@@ -71,6 +72,7 @@ export default function App() {
+           <Route path="/terms" element={<Terms />} />
+         </Routes>
+       </main>
++      <ReportIssueButton />
+       <Footer />
+     </div>
+   );
+diff --git a/src/components/ReportIssueButton.tsx b/src/components/ReportIssueButton.tsx
+new file mode 100644
+index 0000000..485b1e3
+--- /dev/null
++++ b/src/components/ReportIssueButton.tsx
+@@ -0,0 +1,28 @@
++import React from "react";
++
++const DEFAULT_SUPPORT_URL = "https://support.tellnab.com";
++
++export default function ReportIssueButton() {
++  const supportBase =
++    (import.meta.env.VITE_SUPPORT_SITE_URL as string | undefined) ||
++    DEFAULT_SUPPORT_URL;
++
++  const pageUrl =
++    typeof window !== "undefined" ? window.location.href : "https://tellnab.com";
++
++  const href = `${supportBase.replace(/\/$/, "")}/?type=ISSUE&pageUrl=${encodeURIComponent(
++    pageUrl,
++  )}&subject=${encodeURIComponent("Issue report")}`;
++
++  return (
++    <a
++      href={href}
++      target="_blank"
++      rel="noreferrer"
++      className="fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 rounded-full border border-violet-300/35 bg-violet-600/90 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-900/35 transition hover:bg-violet-500"
++      aria-label="Report issue"
++    >
++      🐞 Report issue
++    </a>
++  );
++}
+diff --git a/src/pages/admin/AdminWorkspace.tsx b/src/pages/admin/AdminWorkspace.tsx
+index 214e920..cbae917 100644
+--- a/src/pages/admin/AdminWorkspace.tsx
++++ b/src/pages/admin/AdminWorkspace.tsx
+@@ -10,6 +10,7 @@ import {
+   getAdminAuditLogs,
+   getAdminBadges,
+   getAdminOverview,
++  listAdminSupportTickets,
+   getAdminUsers,
+   listAdminCategories,
+   listAdminGroupModerationActions,
+@@ -21,6 +22,7 @@ import {
+   rejectGroupJoinRequest,
+   updateAdminCategory,
+   updateAdminGroup,
++  updateAdminSupportTicket,
+   updateAdminUserRole,
+   updateAdminUserStatus,
+   updateAdviceFlags,
+@@ -37,6 +39,9 @@ import {
+   ModerationActivityItem,
+   ModerationAiHintResult,
+   ModerationGroupRequest,
++  SupportTicket,
++  SupportTicketPriority,
++  SupportTicketStatus,
+   UserRole,
+ } from "../../types";
+ import { useToast } from "../../context/ToastContext";
+@@ -48,6 +53,7 @@ type SectionKey =
+   | "moderation"
+   | "groupRequests"
+   | "activity"
++  | "support"
+   | "users"
+   | "wallet"
+   | "badges"
+@@ -67,6 +73,7 @@ const ALL_SECTIONS: SectionItem[] = [
+   { key: "moderation", label: "Moderation Queue", icon: "🛡️" },
+   { key: "groupRequests", label: "Group Requests", icon: "👥" },
+   { key: "activity", label: "Moderation Activity", icon: "🕒" },
++  { key: "support", label: "Support Inbox", icon: "🎫" },
+   { key: "users", label: "Users & Roles", icon: "🧩", adminOnly: true },
+   { key: "wallet", label: "Wallet Controls", icon: "💳", adminOnly: true },
+   { key: "badges", label: "Badge Operations", icon: "🏅", adminOnly: true },
+@@ -102,6 +109,29 @@ function badgeClass(isActive: boolean) {
+     : "rounded-full border border-white/15 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300";
+ }
+ 
++function priorityBadgeClass(priority: string) {
++  if (priority === "URGENT") {
++    return "rounded-full border border-rose-300/35 bg-rose-500/15 px-2 py-0.5 text-[11px] text-rose-200";
++  }
++  if (priority === "LOW") {
++    return "rounded-full border border-slate-300/20 bg-slate-700/30 px-2 py-0.5 text-[11px] text-slate-200";
++  }
++  return "rounded-full border border-cyan-300/30 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200";
++}
++
++function statusBadgeClass(status: string) {
++  if (status === "OPEN") {
++    return "rounded-full border border-amber-300/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200";
++  }
++  if (status === "IN_PROGRESS") {
++    return "rounded-full border border-violet-300/30 bg-violet-500/10 px-2 py-0.5 text-[11px] text-violet-200";
++  }
++  if (status === "RESOLVED") {
++    return "rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200";
++  }
++  return "rounded-full border border-slate-300/20 bg-slate-700/30 px-2 py-0.5 text-[11px] text-slate-200";
++}
++
+ export default function AdminWorkspace() {
+   const toast = useToast();
+   const { user } = useAuth();
+@@ -124,6 +154,12 @@ export default function AdminWorkspace() {
+   const [moderationActivity, setModerationActivity] = useState<
+     ModerationActivityItem[]
+   >([]);
++  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
++  const [supportStatusFilter, setSupportStatusFilter] =
++    useState<SupportTicketStatus | "ALL">("OPEN");
++  const [supportPriorityFilter, setSupportPriorityFilter] =
++    useState<SupportTicketPriority | "ALL">("ALL");
++  const [supportSearch, setSupportSearch] = useState("");
+   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
+   const [groupHistory, setGroupHistory] = useState<ModerationActivityItem[]>(
+     [],
+@@ -172,6 +208,7 @@ export default function AdminWorkspace() {
+       moderation: moderationItems.length,
+       groupRequests: groupRequests.length,
+       activity: moderationActivity.length,
++      support: supportTickets.length,
+       users: users.length,
+       badges: badges.length,
+       categories: categories.length,
+@@ -186,6 +223,7 @@ export default function AdminWorkspace() {
+       groups.length,
+       moderationActivity.length,
+       moderationItems.length,
++      supportTickets.length,
+       users.length,
+     ],
+   );
+@@ -225,6 +263,17 @@ export default function AdminWorkspace() {
+     setModerationActivity(activity);
+   }
+ 
++  async function loadSupportInbox() {
++    const tickets = await listAdminSupportTickets({
++      status: supportStatusFilter === "ALL" ? undefined : supportStatusFilter,
++      priority:
++        supportPriorityFilter === "ALL" ? undefined : supportPriorityFilter,
++      q: supportSearch.trim() || undefined,
++      limit: 150,
++    });
++    setSupportTickets(tickets);
++  }
++
+   async function loadAdminOnly() {
+     if (!isAdmin) {
+       setUsers([]);
+@@ -267,7 +316,7 @@ export default function AdminWorkspace() {
+       setError(null);
+       const [overviewData] = await Promise.all([getAdminOverview()]);
+       setOverview(overviewData);
+-      await Promise.all([loadModeration(), loadAdminOnly()]);
++      await Promise.all([loadModeration(), loadSupportInbox(), loadAdminOnly()]);
+     } catch (err) {
+       const message = parseApiError(
+         err,
+@@ -304,6 +353,20 @@ export default function AdminWorkspace() {
+       .catch(() => setGroupHistory([]));
+   }, [activeSection, isAdmin, selectedGroupId]);
+ 
++  useEffect(() => {
++    if (activeSection !== "support") {
++      return;
++    }
++
++    void loadSupportInbox();
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [
++    activeSection,
++    supportPriorityFilter,
++    supportSearch,
++    supportStatusFilter,
++  ]);
++
+   async function reloadAdminOnlyAndOverview() {
+     const [overviewData] = await Promise.all([getAdminOverview()]);
+     setOverview(overviewData);
+@@ -584,6 +647,53 @@ export default function AdminWorkspace() {
+     }
+   }
+ 
++  async function onUpdateSupportTicket(
++    ticketId: string,
++    payload: {
++      status?: SupportTicketStatus;
++      priority?: SupportTicketPriority;
++      internalNote?: string | null;
++      resolutionSummary?: string | null;
++    },
++    successMessage: string,
++  ) {
++    try {
++      setActionLoading(true);
++      setError(null);
++      await updateAdminSupportTicket(ticketId, payload);
++      await Promise.all([loadSupportInbox(), getAdminOverview().then(setOverview)]);
++      toast.success(successMessage);
++    } catch (err) {
++      const message = parseApiError(err, "Failed to update support ticket.");
++      setError(message);
++      toast.error(message);
++    } finally {
++      setActionLoading(false);
++    }
++  }
++
++  async function onTransitionSupportTicket(
++    ticket: SupportTicket,
++    status: SupportTicketStatus,
++  ) {
++    if (status === "RESOLVED" || status === "CLOSED") {
++      const resolutionSummary =
++        window.prompt("Add resolution summary (optional):", ticket.resolutionSummary || "") || undefined;
++      await onUpdateSupportTicket(
++        ticket.id,
++        { status, resolutionSummary },
++        `Ticket marked ${status.toLowerCase().replace("_", " ")}.`,
++      );
++      return;
++    }
++
++    await onUpdateSupportTicket(
++      ticket.id,
++      { status },
++      `Ticket moved to ${status.toLowerCase().replace("_", " ")}.`,
++    );
++  }
++
+   if (loading) {
+     return (
+       <Card>
+@@ -1021,6 +1131,225 @@ export default function AdminWorkspace() {
+           </>
+         ) : null}
+ 
++        {activeSection === "support" ? (
++          <>
++            <Card>
++              <h2 className="text-xl font-semibold text-white">Support Inbox</h2>
++              <p className="mt-1 text-sm text-slate-300">
++                Triage support tickets with SLA priorities and resolve/close workflow.
++              </p>
++
++              <div className="mt-4 grid gap-2 md:grid-cols-[170px_170px_1fr_auto]">
++                <select
++                  className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
++                  value={supportStatusFilter}
++                  onChange={(event) =>
++                    setSupportStatusFilter(
++                      event.target.value as SupportTicketStatus | "ALL",
++                    )
++                  }
++                >
++                  <option value="ALL">All statuses</option>
++                  <option value="OPEN">Open</option>
++                  <option value="IN_PROGRESS">In progress</option>
++                  <option value="RESOLVED">Resolved</option>
++                  <option value="CLOSED">Closed</option>
++                </select>
++
++                <select
++                  className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
++                  value={supportPriorityFilter}
++                  onChange={(event) =>
++                    setSupportPriorityFilter(
++                      event.target.value as SupportTicketPriority | "ALL",
++                    )
++                  }
++                >
++                  <option value="ALL">All priorities</option>
++                  <option value="URGENT">Urgent</option>
++                  <option value="NORMAL">Normal</option>
++                  <option value="LOW">Low</option>
++                </select>
++
++                <input
++                  className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
++                  placeholder="Search name, email, subject, message"
++                  value={supportSearch}
++                  onChange={(event) => setSupportSearch(event.target.value)}
++                />
++
++                <Button
++                  variant="secondary"
++                  disabled={actionLoading}
++                  onClick={() => void loadSupportInbox()}
++                >
++                  Refresh
++                </Button>
++              </div>
++            </Card>
++
++            {supportTickets.map((ticket) => (
++              <Card key={ticket.id}>
++                <div className="flex flex-wrap items-center justify-between gap-2">
++                  <div className="flex flex-wrap items-center gap-2">
++                    <span className={statusBadgeClass(ticket.status)}>
++                      {ticket.status}
++                    </span>
++                    <span className={priorityBadgeClass(ticket.priority)}>
++                      {ticket.priority}
++                    </span>
++                    <span className="rounded-full border border-cyan-300/25 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200">
++                      SLA {ticket.slaLabel}
++                    </span>
++                    {ticket.isSlaBreached ? (
++                      <span className="rounded-full border border-rose-300/30 bg-rose-500/15 px-2 py-0.5 text-[11px] text-rose-200">
++                        SLA breached
++                      </span>
++                    ) : null}
++                  </div>
++                  <p className="text-xs text-slate-400">
++                    {new Date(ticket.createdAt).toLocaleString()}
++                  </p>
++                </div>
++
++                <h3 className="mt-3 text-lg font-semibold text-white">
++                  {ticket.subject}
++                </h3>
++                <p className="mt-1 text-sm text-slate-300">
++                  {ticket.requesterName} • {ticket.requesterEmail}
++                </p>
++                <p className="mt-2 text-sm text-slate-200">{ticket.message}</p>
++
++                <div className="mt-2 text-xs text-slate-400">
++                  <p>Type: {ticket.type}</p>
++                  <p>
++                    First response due: {" "}
++                    {ticket.firstResponseDueAt
++                      ? new Date(ticket.firstResponseDueAt).toLocaleString()
++                      : "Not set"}
++                  </p>
++                  <p>
++                    First response at: {" "}
++                    {ticket.firstResponseAt
++                      ? new Date(ticket.firstResponseAt).toLocaleString()
++                      : "Pending"}
++                  </p>
++                  {ticket.pageUrl ? (
++                    <p>
++                      Page: {" "}
++                      <a
++                        href={ticket.pageUrl}
++                        target="_blank"
++                        rel="noreferrer"
++                        className="text-violet-300 underline"
++                      >
++                        {ticket.pageUrl}
++                      </a>
++                    </p>
++                  ) : null}
++                </div>
++
++                {ticket.internalNote ? (
++                  <div className="mt-2 rounded-lg border border-white/10 bg-slate-950 p-2 text-xs text-slate-300">
++                    <p className="font-semibold text-slate-200">Internal note</p>
++                    <p className="mt-1">{ticket.internalNote}</p>
++                  </div>
++                ) : null}
++
++                {ticket.resolutionSummary ? (
++                  <div className="mt-2 rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2 text-xs text-emerald-100">
++                    <p className="font-semibold">Resolution summary</p>
++                    <p className="mt-1">{ticket.resolutionSummary}</p>
++                  </div>
++                ) : null}
++
++                <div className="mt-3 flex flex-wrap gap-2">
++                  <Button
++                    variant="secondary"
++                    disabled={actionLoading}
++                    onClick={() =>
++                      void onUpdateSupportTicket(
++                        ticket.id,
++                        {
++                          priority:
++                            ticket.priority === "URGENT"
++                              ? "NORMAL"
++                              : ticket.priority === "NORMAL"
++                              ? "LOW"
++                              : "URGENT",
++                        },
++                        "Ticket priority updated.",
++                      )
++                    }
++                  >
++                    Cycle priority
++                  </Button>
++                  <Button
++                    variant="secondary"
++                    disabled={actionLoading || ticket.status === "IN_PROGRESS"}
++                    onClick={() =>
++                      void onTransitionSupportTicket(ticket, "IN_PROGRESS")
++                    }
++                  >
++                    Mark in progress
++                  </Button>
++                  <Button
++                    variant="secondary"
++                    disabled={actionLoading || ticket.status === "RESOLVED"}
++                    onClick={() =>
++                      void onTransitionSupportTicket(ticket, "RESOLVED")
++                    }
++                  >
++                    Resolve
++                  </Button>
++                  <Button
++                    variant="secondary"
++                    disabled={actionLoading || ticket.status === "CLOSED"}
++                    onClick={() =>
++                      void onTransitionSupportTicket(ticket, "CLOSED")
++                    }
++                  >
++                    Close
++                  </Button>
++                  <Button
++                    variant="secondary"
++                    disabled={actionLoading || ticket.status === "OPEN"}
++                    onClick={() =>
++                      void onTransitionSupportTicket(ticket, "OPEN")
++                    }
++                  >
++                    Re-open
++                  </Button>
++                  <Button
++                    variant="secondary"
++                    disabled={actionLoading}
++                    onClick={() => {
++                      const note =
++                        window.prompt(
++                          "Add/update internal note:",
++                          ticket.internalNote || "",
++                        ) || "";
++                      void onUpdateSupportTicket(
++                        ticket.id,
++                        { internalNote: note || null },
++                        "Internal note updated.",
++                      );
++                    }}
++                  >
++                    Add note
++                  </Button>
++                </div>
++              </Card>
++            ))}
++
++            {supportTickets.length === 0 ? (
++              <Card>
++                <p className="text-slate-400">No support tickets match current filters.</p>
++              </Card>
++            ) : null}
++          </>
++        ) : null}
++
+         {isAdmin && activeSection === "users" ? (
+           <>
+             <Card>
+diff --git a/src/services/api.ts b/src/services/api.ts
+index 06681a5..068ca16 100644
+--- a/src/services/api.ts
++++ b/src/services/api.ts
+@@ -27,6 +27,9 @@ import {
+   ModerationGroupRequest,
+   PrivateMessage,
+   SearchUser,
++  SupportTicket,
++  SupportTicketPriority,
++  SupportTicketStatus,
+   UserBadge,
+   UserProfile,
+   UserRole,
+@@ -342,6 +345,38 @@ export async function getAdminOverview(): Promise<AdminOverview> {
+   return response.data;
+ }
+ 
++export async function listAdminSupportTickets(options?: {
++  status?: SupportTicketStatus;
++  type?: "INQUIRY" | "ISSUE" | "SUGGESTION";
++  priority?: SupportTicketPriority;
++  q?: string;
++  limit?: number;
++}): Promise<SupportTicket[]> {
++  const response = await api.get<{ tickets: SupportTicket[] }>("/admin/support/tickets", {
++    params: {
++      ...(options?.status ? { status: options.status } : {}),
++      ...(options?.type ? { type: options.type } : {}),
++      ...(options?.priority ? { priority: options.priority } : {}),
++      ...(options?.q ? { q: options.q } : {}),
++      ...(options?.limit ? { limit: options.limit } : {}),
++    },
++  });
++  return response.data.tickets;
++}
++
++export async function updateAdminSupportTicket(
++  id: string,
++  payload: {
++    status?: SupportTicketStatus;
++    priority?: SupportTicketPriority;
++    internalNote?: string | null;
++    resolutionSummary?: string | null;
++  },
++): Promise<SupportTicket> {
++  const response = await api.patch<{ ticket: SupportTicket }>(`/admin/support/tickets/${id}`, payload);
++  return response.data.ticket;
++}
++
+ export async function listAdminCategories(): Promise<CategoryItem[]> {
+   const response = await api.get<{ categories: CategoryItem[] }>("/admin/categories");
+   return response.data.categories;
+diff --git a/src/types/index.ts b/src/types/index.ts
+index 85752a7..596527b 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -137,6 +137,41 @@ export type AdminOverview = {
+   } | null;
+ };
+ 
++export type SupportTicketPriority = "URGENT" | "NORMAL" | "LOW";
++
++export type SupportTicketStatus =
++  | "OPEN"
++  | "IN_PROGRESS"
++  | "RESOLVED"
++  | "CLOSED";
++
++export type SupportTicket = {
++  id: string;
++  type: "INQUIRY" | "ISSUE" | "SUGGESTION" | string;
++  priority: SupportTicketPriority | string;
++  slaTargetHours: number;
++  slaLabel: string;
++  status: SupportTicketStatus | string;
++  requesterName: string;
++  requesterEmail: string;
++  subject: string;
++  message: string;
++  pageUrl?: string | null;
++  firstResponseDueAt?: string | null;
++  firstResponseAt?: string | null;
++  isSlaBreached?: boolean;
++  internalNote?: string | null;
++  resolutionSummary?: string | null;
++  createdAt: string;
++  updatedAt: string;
++  resolvedAt?: string | null;
++  resolvedBy?: {
++    id: string;
++    name: string;
++    role?: UserRole;
++  } | null;
++};
++
+ export type AdminGroupItem = GroupSummary & {
+   pendingJoinRequests: number;
+   adviceCount: number;
+diff --git a/support-site/README.md b/support-site/README.md
+index 7a16a78..34ec83d 100644
+--- a/support-site/README.md
++++ b/support-site/README.md
+@@ -7,8 +7,13 @@ This folder is a standalone static support portal intended for deployment at:
+ ## Features
+ 
+ - Public support request form
++- Dedicated public status page: `status.html`
+ - Supports request types: `INQUIRY`, `ISSUE`, `SUGGESTION`
++- Ticket priorities with SLA labels: `URGENT` (4h), `NORMAL` (24h), `LOW` (72h)
+ - Submits to backend endpoint: `/api/support/tickets`
++- Public status section for outages/incidents/maintenance windows
++- Help center article cards with screenshot assets
++- Query-prefill support for in-app report links (`type`, `pageUrl`, `subject`)
+ - Includes a "suggestions we can implement" section for product planning
+ 
+ ## Deployment
+diff --git a/support-site/app.js b/support-site/app.js
+index 9a1024e..79d9a9f 100644
+--- a/support-site/app.js
++++ b/support-site/app.js
+@@ -7,12 +7,88 @@ const API_BASE =
+ const form = document.getElementById("support-form");
+ const statusEl = document.getElementById("form-status");
+ const submitBtn = document.getElementById("submit-btn");
++const prioritySelect = document.getElementById("priority-select");
++const slaInfoEl = document.getElementById("sla-info");
++const statusListEl = document.getElementById("status-list");
++
++const statusItems = [
++  {
++    title: "Core API",
++    kind: "operational",
++    state: "Operational",
++    detail: "No active outage detected.",
++    updatedAt: new Date().toISOString(),
++  },
++  {
++    title: "Incident",
++    kind: "incident",
++    state: "Monitoring",
++    detail: "Intermittent login delays earlier today are now stabilized.",
++    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
++  },
++  {
++    title: "Maintenance window",
++    kind: "maintenance",
++    state: "Scheduled",
++    detail: "Planned maintenance Sunday 02:00–03:00 UTC.",
++    updatedAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
++  },
++];
++
++const slaLabels = {
++  URGENT: "Urgent SLA: first response target is 4 hours.",
++  NORMAL: "Normal SLA: first response target is 24 hours.",
++  LOW: "Low SLA: first response target is 72 hours.",
++};
+ 
+ function setStatus(text, tone = "") {
+   statusEl.textContent = text;
+   statusEl.className = tone;
+ }
+ 
++function renderStatusItems() {
++  statusListEl.innerHTML = statusItems
++    .map(
++      (item) => `
++      <article class="status-card">
++        <span class="status-pill ${item.kind}">${item.state}</span>
++        <p class="status-title">${item.title}</p>
++        <p class="status-meta">${item.detail}</p>
++        <p class="status-meta">Updated: ${new Date(item.updatedAt).toLocaleString()}</p>
++      </article>
++    `,
++    )
++    .join("");
++}
++
++function applyQueryPrefill() {
++  const params = new URLSearchParams(window.location.search);
++  const type = params.get("type");
++  const pageUrl = params.get("pageUrl");
++  const subject = params.get("subject");
++
++  if (type && ["INQUIRY", "ISSUE", "SUGGESTION"].includes(type)) {
++    form.elements.type.value = type;
++  }
++
++  if (pageUrl) {
++    form.elements.pageUrl.value = pageUrl;
++  }
++
++  if (subject) {
++    form.elements.subject.value = subject;
++  }
++}
++
++function syncSlaInfo() {
++  slaInfoEl.textContent = slaLabels[prioritySelect.value] || "";
++}
++
++renderStatusItems();
++applyQueryPrefill();
++syncSlaInfo();
++prioritySelect.addEventListener("change", syncSlaInfo);
++
+ form.addEventListener("submit", async (event) => {
+   event.preventDefault();
+ 
+@@ -21,6 +97,7 @@ form.addEventListener("submit", async (event) => {
+     requesterName: String(data.get("requesterName") || "").trim(),
+     requesterEmail: String(data.get("requesterEmail") || "").trim(),
+     type: String(data.get("type") || "INQUIRY"),
++    priority: String(data.get("priority") || "NORMAL"),
+     pageUrl: String(data.get("pageUrl") || "").trim(),
+     subject: String(data.get("subject") || "").trim(),
+     message: String(data.get("message") || "").trim(),
+diff --git a/support-site/assets/screenshots/account-settings.svg b/support-site/assets/screenshots/account-settings.svg
+new file mode 100644
+index 0000000..993da45
+--- /dev/null
++++ b/support-site/assets/screenshots/account-settings.svg
+@@ -0,0 +1,17 @@
++<svg width="900" height="520" viewBox="0 0 900 520" fill="none" xmlns="http://www.w3.org/2000/svg">
++  <rect width="900" height="520" rx="24" fill="#0B1222"/>
++  <rect x="32" y="32" width="220" height="456" rx="14" fill="#141D35"/>
++  <rect x="68" y="72" width="148" height="14" rx="7" fill="#7C8BFF"/>
++  <rect x="54" y="118" width="176" height="12" rx="6" fill="#96A3D8"/>
++  <rect x="54" y="150" width="176" height="12" rx="6" fill="#96A3D8"/>
++  <rect x="54" y="182" width="176" height="12" rx="6" fill="#96A3D8"/>
++  <rect x="284" y="32" width="584" height="456" rx="14" fill="#141D35"/>
++  <circle cx="364" cy="108" r="34" fill="#7C8BFF"/>
++  <rect x="416" y="82" width="180" height="14" rx="7" fill="#E5EAFF"/>
++  <rect x="416" y="108" width="140" height="10" rx="5" fill="#9AA8DE"/>
++  <rect x="332" y="180" width="488" height="44" rx="10" fill="#0E162C" stroke="#2D3964"/>
++  <rect x="332" y="240" width="488" height="44" rx="10" fill="#0E162C" stroke="#2D3964"/>
++  <rect x="332" y="300" width="488" height="44" rx="10" fill="#0E162C" stroke="#2D3964"/>
++  <rect x="332" y="380" width="158" height="42" rx="10" fill="#5F7DFF"/>
++  <text x="50%" y="490" text-anchor="middle" fill="#9FB0E5" font-family="Arial, sans-serif" font-size="20">Account settings flow</text>
++</svg>
+diff --git a/support-site/assets/screenshots/posting-workflow.svg b/support-site/assets/screenshots/posting-workflow.svg
+new file mode 100644
+index 0000000..2c712df
+--- /dev/null
++++ b/support-site/assets/screenshots/posting-workflow.svg
+@@ -0,0 +1,13 @@
++<svg width="900" height="520" viewBox="0 0 900 520" fill="none" xmlns="http://www.w3.org/2000/svg">
++  <rect width="900" height="520" rx="24" fill="#0B1222"/>
++  <rect x="38" y="38" width="824" height="444" rx="16" fill="#141D35"/>
++  <rect x="74" y="82" width="440" height="34" rx="10" fill="#0D162C" stroke="#30406F"/>
++  <rect x="74" y="132" width="752" height="164" rx="12" fill="#0D162C" stroke="#30406F"/>
++  <rect x="74" y="316" width="130" height="34" rx="8" fill="#1B2749"/>
++  <rect x="218" y="316" width="130" height="34" rx="8" fill="#1B2749"/>
++  <rect x="362" y="316" width="130" height="34" rx="8" fill="#1B2749"/>
++  <rect x="74" y="378" width="230" height="44" rx="10" fill="#5F7DFF"/>
++  <rect x="326" y="378" width="230" height="44" rx="10" fill="#27355E"/>
++  <rect x="578" y="378" width="248" height="44" rx="10" fill="#27355E"/>
++  <text x="50%" y="490" text-anchor="middle" fill="#9FB0E5" font-family="Arial, sans-serif" font-size="20">Posting and moderation workflow</text>
++</svg>
+diff --git a/support-site/assets/screenshots/report-flow.svg b/support-site/assets/screenshots/report-flow.svg
+new file mode 100644
+index 0000000..a0869fe
+--- /dev/null
++++ b/support-site/assets/screenshots/report-flow.svg
+@@ -0,0 +1,13 @@
++<svg width="900" height="520" viewBox="0 0 900 520" fill="none" xmlns="http://www.w3.org/2000/svg">
++  <rect width="900" height="520" rx="24" fill="#0B1222"/>
++  <rect x="46" y="50" width="808" height="420" rx="16" fill="#141D35"/>
++  <rect x="92" y="104" width="716" height="300" rx="14" fill="#0D162C" stroke="#2E3C68"/>
++  <circle cx="170" cy="166" r="24" fill="#FF7676"/>
++  <rect x="214" y="152" width="280" height="14" rx="7" fill="#E8ECFF"/>
++  <rect x="214" y="178" width="420" height="10" rx="5" fill="#9AA8DE"/>
++  <rect x="122" y="230" width="656" height="116" rx="10" fill="#111C35"/>
++  <rect x="122" y="364" width="180" height="32" rx="8" fill="#5F7DFF"/>
++  <rect x="316" y="364" width="180" height="32" rx="8" fill="#25345D"/>
++  <rect x="510" y="364" width="268" height="32" rx="8" fill="#25345D"/>
++  <text x="50%" y="490" text-anchor="middle" fill="#9FB0E5" font-family="Arial, sans-serif" font-size="20">Issue report flow with prefilled URL</text>
++</svg>
+diff --git a/support-site/index.html b/support-site/index.html
+index 25823de..0285aff 100644
+--- a/support-site/index.html
++++ b/support-site/index.html
+@@ -18,9 +18,49 @@
+         <p class="subtitle">
+           Submit inquiries, report issues, or share suggestions. Our team tracks every request.
+         </p>
++        <nav class="quick-links">
++          <a href="./status.html">Status page</a>
++          <a href="#status">Status</a>
++          <a href="#help">Help center</a>
++          <a href="#contact">Contact support</a>
++        </nav>
+       </header>
+ 
+-      <section class="panel">
++      <section class="panel" id="status">
++        <h2>Public system status</h2>
++        <p class="subtle">Outages, incidents, and maintenance windows.</p>
++        <div id="status-list" class="status-grid"></div>
++      </section>
++
++      <section class="panel" id="help">
++        <h2>Help center</h2>
++        <p class="subtle">Common account and posting workflows with screenshots.</p>
++        <div class="help-grid">
++          <article class="help-item">
++            <img src="./assets/screenshots/account-settings.svg" alt="Account settings screenshot" />
++            <h3>Fix account sign-in issues</h3>
++            <p>
++              Check email spelling, reset password, and verify social sign-in provider from your profile settings.
++            </p>
++          </article>
++          <article class="help-item">
++            <img src="./assets/screenshots/posting-workflow.svg" alt="Posting workflow screenshot" />
++            <h3>Why my thread is pending</h3>
++            <p>
++              New advice threads pass moderation before going public. Keep title/body clear to speed approval.
++            </p>
++          </article>
++          <article class="help-item">
++            <img src="./assets/screenshots/report-flow.svg" alt="Issue reporting screenshot" />
++            <h3>Report a website problem</h3>
++            <p>
++              Use in-app “Report issue” or this form. Include affected URL and exact steps to reproduce.
++            </p>
++          </article>
++        </div>
++      </section>
++
++      <section class="panel" id="contact">
+         <h2>Contact support</h2>
+         <form id="support-form" novalidate>
+           <div class="grid two">
+@@ -43,10 +83,22 @@
+                 <option value="SUGGESTION">Feature suggestion</option>
+               </select>
+             </label>
++            <label>
++              Priority (SLA)
++              <select name="priority" id="priority-select" required>
++                <option value="NORMAL">Normal • 24h first response</option>
++                <option value="URGENT">Urgent • 4h first response</option>
++                <option value="LOW">Low • 72h first response</option>
++              </select>
++            </label>
++          </div>
++
++          <div class="grid two">
+             <label>
+               Affected page URL (optional)
+               <input name="pageUrl" type="url" maxlength="1000" placeholder="https://tellnab.com/..." />
+             </label>
++            <p id="sla-info" class="sla-info" aria-live="polite"></p>
+           </div>
+ 
+           <label>
+diff --git a/support-site/status.html b/support-site/status.html
+new file mode 100644
+index 0000000..efd2395
+--- /dev/null
++++ b/support-site/status.html
+@@ -0,0 +1,31 @@
++<!doctype html>
++<html lang="en">
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>TellNab Status</title>
++    <meta name="description" content="TellNab public status page for outages, incidents, and maintenance windows." />
++    <link rel="stylesheet" href="./styles.css" />
++  </head>
++  <body>
++    <main class="container">
++      <header class="hero">
++        <p class="eyebrow">status.tellnab.com • support.tellnab.com/status</p>
++        <h1>TellNab Public Status</h1>
++        <p class="subtitle">Live visibility into incidents, outages, and maintenance windows.</p>
++        <nav class="quick-links">
++          <a href="./index.html">Support Home</a>
++          <a href="#status">Status feed</a>
++        </nav>
++      </header>
++
++      <section class="panel" id="status">
++        <h2>System status feed</h2>
++        <p class="subtle">Operational notices and incident updates.</p>
++        <div id="status-list" class="status-grid"></div>
++      </section>
++    </main>
++
++    <script src="./status.js" type="module"></script>
++  </body>
++</html>
+diff --git a/support-site/status.js b/support-site/status.js
+new file mode 100644
+index 0000000..0da59c7
+--- /dev/null
++++ b/support-site/status.js
+@@ -0,0 +1,38 @@
++const statusListEl = document.getElementById("status-list");
++
++const statusItems = [
++  {
++    title: "Core API",
++    kind: "operational",
++    state: "Operational",
++    detail: "No active outage detected.",
++    updatedAt: new Date().toISOString(),
++  },
++  {
++    title: "Incident",
++    kind: "incident",
++    state: "Monitoring",
++    detail: "Intermittent login delays earlier today are now stabilized.",
++    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
++  },
++  {
++    title: "Maintenance window",
++    kind: "maintenance",
++    state: "Scheduled",
++    detail: "Planned maintenance Sunday 02:00–03:00 UTC.",
++    updatedAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
++  },
++];
++
++statusListEl.innerHTML = statusItems
++  .map(
++    (item) => `
++      <article class="status-card">
++        <span class="status-pill ${item.kind}">${item.state}</span>
++        <p class="status-title">${item.title}</p>
++        <p class="status-meta">${item.detail}</p>
++        <p class="status-meta">Updated: ${new Date(item.updatedAt).toLocaleString()}</p>
++      </article>
++    `,
++  )
++  .join("");
+diff --git a/support-site/styles.css b/support-site/styles.css
+index 99a5119..54055c4 100644
+--- a/support-site/styles.css
++++ b/support-site/styles.css
+@@ -52,6 +52,33 @@ h2 {
+   margin: 0;
+ }
+ 
++.subtle {
++  color: var(--muted);
++  margin: 0 0 0.6rem;
++  font-size: 0.92rem;
++}
++
++.quick-links {
++  margin-top: 0.9rem;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.55rem;
++}
++
++.quick-links a {
++  display: inline-flex;
++  padding: 0.35rem 0.65rem;
++  border: 1px solid var(--border);
++  border-radius: 999px;
++  color: #d7ddff;
++  text-decoration: none;
++  font-size: 0.8rem;
++}
++
++.quick-links a:hover {
++  border-color: #7486ff;
++}
++
+ .panel {
+   background: color-mix(in oklab, var(--panel), black 5%);
+   border: 1px solid var(--border);
+@@ -59,6 +86,86 @@ h2 {
+   padding: 1rem;
+ }
+ 
++.status-grid {
++  display: grid;
++  gap: 0.7rem;
++  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
++}
++
++.status-card {
++  border: 1px solid var(--border);
++  border-radius: 12px;
++  background: #0d1221;
++  padding: 0.75rem;
++}
++
++.status-title {
++  margin: 0;
++  font-size: 0.92rem;
++  font-weight: 700;
++}
++
++.status-meta {
++  margin: 0.2rem 0 0;
++  font-size: 0.78rem;
++  color: var(--muted);
++}
++
++.status-pill {
++  display: inline-flex;
++  align-items: center;
++  border: 1px solid var(--border);
++  border-radius: 999px;
++  padding: 0.1rem 0.45rem;
++  font-size: 0.72rem;
++  margin-bottom: 0.45rem;
++}
++
++.status-pill.operational {
++  border-color: color-mix(in oklab, var(--ok), black 30%);
++  color: var(--ok);
++}
++
++.status-pill.incident {
++  border-color: color-mix(in oklab, var(--error), black 30%);
++  color: var(--error);
++}
++
++.status-pill.maintenance {
++  border-color: color-mix(in oklab, var(--accent), black 30%);
++  color: #afbbff;
++}
++
++.help-grid {
++  display: grid;
++  gap: 0.75rem;
++  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
++}
++
++.help-item {
++  border: 1px solid var(--border);
++  border-radius: 12px;
++  padding: 0.7rem;
++  background: #0d1221;
++}
++
++.help-item img {
++  width: 100%;
++  border: 1px solid var(--border);
++  border-radius: 10px;
++}
++
++.help-item h3 {
++  margin: 0.6rem 0 0.35rem;
++  font-size: 0.98rem;
++}
++
++.help-item p {
++  margin: 0;
++  color: var(--muted);
++  font-size: 0.88rem;
++}
++
+ form {
+   display: grid;
+   gap: 0.75rem;
+@@ -108,6 +215,13 @@ textarea {
+   gap: 0.8rem;
+ }
+ 
++.sla-info {
++  margin: 0;
++  font-size: 0.82rem;
++  color: #b9c1e8;
++  align-self: end;
++}
++
+ button {
+   border: none;
+   border-radius: 10px;
+-- 
+2.39.5 (Apple Git-154)
+
+
+From 6ef9b694466f562e52c907c436955413999108cf Mon Sep 17 00:00:00 2001
+From: Nabeel Khawar <nabeelkhawar@Nabeels-MacBook-Air.local>
+Date: Thu, 19 Feb 2026 22:54:04 +0500
+Subject: [PATCH 2/2] chore: refine support inbox and report issue UI
+
+---
+ src/components/ReportIssueButton.tsx |  9 ++++--
+ src/pages/admin/AdminWorkspace.tsx   | 47 +++++++++++++++++++---------
+ 2 files changed, 40 insertions(+), 16 deletions(-)
+
+diff --git a/src/components/ReportIssueButton.tsx b/src/components/ReportIssueButton.tsx
+index 485b1e3..1fefd03 100644
+--- a/src/components/ReportIssueButton.tsx
++++ b/src/components/ReportIssueButton.tsx
+@@ -8,9 +8,14 @@ export default function ReportIssueButton() {
+     DEFAULT_SUPPORT_URL;
+ 
+   const pageUrl =
+-    typeof window !== "undefined" ? window.location.href : "https://tellnab.com";
++    typeof window !== "undefined"
++      ? window.location.href
++      : "https://tellnab.com";
+ 
+-  const href = `${supportBase.replace(/\/$/, "")}/?type=ISSUE&pageUrl=${encodeURIComponent(
++  const href = `${supportBase.replace(
++    /\/$/,
++    "",
++  )}/?type=ISSUE&pageUrl=${encodeURIComponent(
+     pageUrl,
+   )}&subject=${encodeURIComponent("Issue report")}`;
+ 
+diff --git a/src/pages/admin/AdminWorkspace.tsx b/src/pages/admin/AdminWorkspace.tsx
+index cbae917..8e0dff4 100644
+--- a/src/pages/admin/AdminWorkspace.tsx
++++ b/src/pages/admin/AdminWorkspace.tsx
+@@ -155,10 +155,12 @@ export default function AdminWorkspace() {
+     ModerationActivityItem[]
+   >([]);
+   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+-  const [supportStatusFilter, setSupportStatusFilter] =
+-    useState<SupportTicketStatus | "ALL">("OPEN");
+-  const [supportPriorityFilter, setSupportPriorityFilter] =
+-    useState<SupportTicketPriority | "ALL">("ALL");
++  const [supportStatusFilter, setSupportStatusFilter] = useState<
++    SupportTicketStatus | "ALL"
++  >("OPEN");
++  const [supportPriorityFilter, setSupportPriorityFilter] = useState<
++    SupportTicketPriority | "ALL"
++  >("ALL");
+   const [supportSearch, setSupportSearch] = useState("");
+   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
+   const [groupHistory, setGroupHistory] = useState<ModerationActivityItem[]>(
+@@ -316,7 +318,11 @@ export default function AdminWorkspace() {
+       setError(null);
+       const [overviewData] = await Promise.all([getAdminOverview()]);
+       setOverview(overviewData);
+-      await Promise.all([loadModeration(), loadSupportInbox(), loadAdminOnly()]);
++      await Promise.all([
++        loadModeration(),
++        loadSupportInbox(),
++        loadAdminOnly(),
++      ]);
+     } catch (err) {
+       const message = parseApiError(
+         err,
+@@ -661,7 +667,10 @@ export default function AdminWorkspace() {
+       setActionLoading(true);
+       setError(null);
+       await updateAdminSupportTicket(ticketId, payload);
+-      await Promise.all([loadSupportInbox(), getAdminOverview().then(setOverview)]);
++      await Promise.all([
++        loadSupportInbox(),
++        getAdminOverview().then(setOverview),
++      ]);
+       toast.success(successMessage);
+     } catch (err) {
+       const message = parseApiError(err, "Failed to update support ticket.");
+@@ -678,7 +687,10 @@ export default function AdminWorkspace() {
+   ) {
+     if (status === "RESOLVED" || status === "CLOSED") {
+       const resolutionSummary =
+-        window.prompt("Add resolution summary (optional):", ticket.resolutionSummary || "") || undefined;
++        window.prompt(
++          "Add resolution summary (optional):",
++          ticket.resolutionSummary || "",
++        ) || undefined;
+       await onUpdateSupportTicket(
+         ticket.id,
+         { status, resolutionSummary },
+@@ -1134,9 +1146,12 @@ export default function AdminWorkspace() {
+         {activeSection === "support" ? (
+           <>
+             <Card>
+-              <h2 className="text-xl font-semibold text-white">Support Inbox</h2>
++              <h2 className="text-xl font-semibold text-white">
++                Support Inbox
++              </h2>
+               <p className="mt-1 text-sm text-slate-300">
+-                Triage support tickets with SLA priorities and resolve/close workflow.
++                Triage support tickets with SLA priorities and resolve/close
++                workflow.
+               </p>
+ 
+               <div className="mt-4 grid gap-2 md:grid-cols-[170px_170px_1fr_auto]">
+@@ -1223,20 +1238,20 @@ export default function AdminWorkspace() {
+                 <div className="mt-2 text-xs text-slate-400">
+                   <p>Type: {ticket.type}</p>
+                   <p>
+-                    First response due: {" "}
++                    First response due:{" "}
+                     {ticket.firstResponseDueAt
+                       ? new Date(ticket.firstResponseDueAt).toLocaleString()
+                       : "Not set"}
+                   </p>
+                   <p>
+-                    First response at: {" "}
++                    First response at:{" "}
+                     {ticket.firstResponseAt
+                       ? new Date(ticket.firstResponseAt).toLocaleString()
+                       : "Pending"}
+                   </p>
+                   {ticket.pageUrl ? (
+                     <p>
+-                      Page: {" "}
++                      Page:{" "}
+                       <a
+                         href={ticket.pageUrl}
+                         target="_blank"
+@@ -1251,7 +1266,9 @@ export default function AdminWorkspace() {
+ 
+                 {ticket.internalNote ? (
+                   <div className="mt-2 rounded-lg border border-white/10 bg-slate-950 p-2 text-xs text-slate-300">
+-                    <p className="font-semibold text-slate-200">Internal note</p>
++                    <p className="font-semibold text-slate-200">
++                      Internal note
++                    </p>
+                     <p className="mt-1">{ticket.internalNote}</p>
+                   </div>
+                 ) : null}
+@@ -1344,7 +1361,9 @@ export default function AdminWorkspace() {
+ 
+             {supportTickets.length === 0 ? (
+               <Card>
+-                <p className="text-slate-400">No support tickets match current filters.</p>
++                <p className="text-slate-400">
++                  No support tickets match current filters.
++                </p>
+               </Card>
+             ) : null}
+           </>
+-- 
+2.39.5 (Apple Git-154)
+
