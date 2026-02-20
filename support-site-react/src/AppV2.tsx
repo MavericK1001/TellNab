@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { SupportLayout } from "./modules/support-v2/components/SupportLayout";
 import { TicketListTable } from "./modules/support-v2/components/TicketListTable";
 import { TicketDetailPanel } from "./modules/support-v2/components/TicketDetailPanel";
@@ -25,7 +25,13 @@ type TicketResponse = {
 
 type ApiError = { message?: string; issues?: { message?: string }[] };
 
-const TOKEN_KEY = "tellnab_support_v2_token";
+type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
 const API_BASE =
   (window as any).SUPPORT_API_BASE ||
   `${window.location.origin.replace(/\/$/, "")}/api`;
@@ -39,16 +45,11 @@ function getErrorMessage(payload: ApiError | null, fallback: string) {
   return fallback;
 }
 
-async function apiRequest<T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-): Promise<T> {
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
-      Authorization: `Bearer ${token}`,
       ...(init?.headers || {}),
     },
     credentials: "include",
@@ -64,12 +65,9 @@ async function apiRequest<T>(
 }
 
 export default function AppV2() {
-  const [token, setToken] = useState<string>(
-    () => window.localStorage.getItem(TOKEN_KEY) || "",
-  );
-  const [tokenInput, setTokenInput] = useState<string>(
-    () => window.localStorage.getItem(TOKEN_KEY) || "",
-  );
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -81,34 +79,58 @@ export default function AppV2() {
     [tickets, selectedTicketId],
   );
 
-  const handleSaveToken = (event: FormEvent) => {
-    event.preventDefault();
-    const next = tokenInput.trim();
-    if (!next) {
-      setTone("error");
-      setStatus("Paste a valid bearer token.");
-      return;
+  const refreshSession = async () => {
+    try {
+      const session = await apiRequest<{ user: AuthUser }>("/auth/me");
+      setAuthUser(session.user);
+      return session.user;
+    } catch {
+      setAuthUser(null);
+      return null;
     }
-
-    window.localStorage.setItem(TOKEN_KEY, next);
-    setToken(next);
-    setTone("ok");
-    setStatus("Token saved.");
   };
 
-  const loadTickets = async () => {
-    if (!token) {
+  useEffect(() => {
+    refreshSession();
+  }, []);
+
+  const handleLogin = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (!email.trim() || !password.trim()) {
       setTone("error");
-      setStatus("Set a bearer token first.");
+      setStatus("Enter email and password.");
       return;
     }
 
     setLoading(true);
     try {
-      const json = await apiRequest<TicketResponse>(
-        "/tickets?page=1&page_size=50",
-        token,
-      );
+      const login = await apiRequest<{ user: AuthUser }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      setAuthUser(login.user);
+      setTone("ok");
+      setStatus(`Signed in as ${login.user.name}.`);
+    } catch (error) {
+      setTone("error");
+      setStatus(error instanceof Error ? error.message : "Login failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTickets = async () => {
+    const current = authUser || (await refreshSession());
+    if (!current) {
+      setTone("error");
+      setStatus("Please sign in first.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const json = await apiRequest<TicketResponse>("/tickets?page=1&page_size=50");
       setTickets(json.data || []);
       setSelectedTicketId((prev) => prev || json.data?.[0]?.id || "");
       setTone("ok");
@@ -124,11 +146,11 @@ export default function AppV2() {
   };
 
   const handleUpdateStatus = async (nextStatus: string) => {
-    if (!selected || !token) return;
+    if (!selected) return;
 
     setLoading(true);
     try {
-      await apiRequest(`/tickets/${encodeURIComponent(selected.id)}`, token, {
+      await apiRequest(`/tickets/${encodeURIComponent(selected.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: nextStatus }),
       });
@@ -151,17 +173,39 @@ export default function AppV2() {
         <div>
           <h2>Support 2.0</h2>
           <p>Subdomain API: {API_BASE}</p>
-          <form onSubmit={handleSaveToken}>
-            <label>Agent Bearer Token</label>
-            <textarea
-              value={tokenInput}
-              onChange={(event) => setTokenInput(event.target.value)}
-              rows={4}
-              placeholder="Paste token from /api/auth/login"
+          {authUser ? (
+            <p>Signed in: {authUser.name} ({authUser.role})</p>
+          ) : (
+            <p>Sign in with your normal TellNab account.</p>
+          )}
+
+          <form onSubmit={handleLogin}>
+            <label>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@tellnab.com"
             />
-            <button type="submit">Save token</button>
+
+            <label>Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Your password"
+            />
+
+            <button type="submit" disabled={loading}>
+              {loading ? "Signing in..." : "Sign in"}
+            </button>
           </form>
-          <button onClick={loadTickets} disabled={loading || !token}>
+
+          <button onClick={refreshSession} disabled={loading}>
+            Use existing session
+          </button>
+
+          <button onClick={loadTickets} disabled={loading || !authUser}>
             {loading ? "Loading..." : "Refresh tickets"}
           </button>
           {status ? <p data-tone={tone}>{status}</p> : null}
@@ -170,7 +214,7 @@ export default function AppV2() {
       topbar={
         <div>
           <strong>Support Ticket Console</strong>
-          <p>Using new module endpoints: /api/tickets*</p>
+          <p>Using your standard TellNab sign-in session.</p>
         </div>
       }
       list={<TicketListTable rows={tickets} onOpen={setSelectedTicketId} />}
