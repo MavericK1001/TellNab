@@ -348,6 +348,13 @@ function supportStaffRequired(req, res, next) {
 
 if (String(process.env.ENABLE_SUPPORT_V2 || "true").toLowerCase() !== "false") {
   const supportModuleRouter = createSupportModule({ authRequired });
+  const supportApiPrefixes = [
+    "/api/tickets",
+    "/api/departments",
+    "/api/users",
+    "/api/roles",
+    "/api/reports",
+  ];
 
   function getRequestHost(req) {
     const rawForwarded = req.headers["x-forwarded-host"];
@@ -361,9 +368,14 @@ if (String(process.env.ENABLE_SUPPORT_V2 || "true").toLowerCase() !== "false") {
     return getRequestHost(req) === SUPPORT_SUBDOMAIN;
   }
 
-  // Support 2.0 loads only when request host matches SUPPORT_SUBDOMAIN.
+  function isSupportApiPath(req) {
+    const path = String(req.path || "");
+    return supportApiPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  }
+
+  // Support 2.0 loads for support subdomain traffic and direct Support API paths.
   app.use((req, res, next) => {
-    if (!isSupportSubdomainRequest(req)) {
+    if (!isSupportSubdomainRequest(req) && !isSupportApiPath(req)) {
       return next();
     }
     return supportModuleRouter(req, res, next);
