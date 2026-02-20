@@ -3,6 +3,9 @@ const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
 
+const hasModelAction = (modelName, actionName) =>
+  Boolean(prisma[modelName] && typeof prisma[modelName][actionName] === "function");
+
 async function main() {
   const adminEmail = process.env.ADMIN_SEED_EMAIL || "admin@tellnab.local";
   const adminPassword = process.env.ADMIN_SEED_PASSWORD || "M@v99N@b!123";
@@ -212,129 +215,141 @@ async function main() {
     ),
   );
 
-  await Promise.all(
-    supportRoles.map((role) =>
-      prisma.role.upsert({
-        where: { key: role.key },
-        update: {
-          name: role.name,
-          description: role.description,
-          isSystem: true,
-          deletedAt: null,
-        },
-        create: {
-          key: role.key,
-          name: role.name,
-          description: role.description,
-          isSystem: true,
-        },
-      }),
-    ),
-  );
+  const supportRbacReady =
+    hasModelAction("role", "upsert") &&
+    hasModelAction("permission", "upsert") &&
+    hasModelAction("rolePermission", "upsert") &&
+    hasModelAction("userRole", "upsert") &&
+    hasModelAction("department", "upsert") &&
+    hasModelAction("slaPolicy", "upsert");
 
-  await Promise.all(
-    supportPermissions.map((permissionKey) =>
-      prisma.permission.upsert({
-        where: { key: permissionKey },
-        update: {
-          name: permissionKey,
-          deletedAt: null,
-        },
-        create: {
-          key: permissionKey,
-          name: permissionKey,
-        },
-      }),
-    ),
-  );
+  if (supportRbacReady) {
+    await Promise.all(
+      supportRoles.map((role) =>
+        prisma.role.upsert({
+          where: { key: role.key },
+          update: {
+            name: role.name,
+            description: role.description,
+            isSystem: true,
+            deletedAt: null,
+          },
+          create: {
+            key: role.key,
+            name: role.name,
+            description: role.description,
+            isSystem: true,
+          },
+        }),
+      ),
+    );
 
-  const [roles, permissions] = await Promise.all([
-    prisma.role.findMany({ where: { key: { in: supportRoles.map((r) => r.key) } } }),
-    prisma.permission.findMany({ where: { key: { in: supportPermissions } } }),
-  ]);
+    await Promise.all(
+      supportPermissions.map((permissionKey) =>
+        prisma.permission.upsert({
+          where: { key: permissionKey },
+          update: {
+            name: permissionKey,
+            deletedAt: null,
+          },
+          create: {
+            key: permissionKey,
+            name: permissionKey,
+          },
+        }),
+      ),
+    );
 
-  const roleByKey = new Map(roles.map((role) => [role.key, role]));
-  const permissionByKey = new Map(permissions.map((permission) => [permission.key, permission]));
+    const [roles, permissions] = await Promise.all([
+      prisma.role.findMany({ where: { key: { in: supportRoles.map((r) => r.key) } } }),
+      prisma.permission.findMany({ where: { key: { in: supportPermissions } } }),
+    ]);
 
-  for (const [roleKey, allowed] of Object.entries(rolePermissionMap)) {
-    const role = roleByKey.get(roleKey);
-    if (!role) continue;
+    const roleByKey = new Map(roles.map((role) => [role.key, role]));
+    const permissionByKey = new Map(permissions.map((permission) => [permission.key, permission]));
 
-    for (const permissionKey of allowed) {
-      const permission = permissionByKey.get(permissionKey);
-      if (!permission) continue;
+    for (const [roleKey, allowed] of Object.entries(rolePermissionMap)) {
+      const role = roleByKey.get(roleKey);
+      if (!role) continue;
 
-      await prisma.rolePermission.upsert({
-        where: {
-          roleId_permissionId: {
+      for (const permissionKey of allowed) {
+        const permission = permissionByKey.get(permissionKey);
+        if (!permission) continue;
+
+        await prisma.rolePermission.upsert({
+          where: {
+            roleId_permissionId: {
+              roleId: role.id,
+              permissionId: permission.id,
+            },
+          },
+          update: {},
+          create: {
             roleId: role.id,
             permissionId: permission.id,
+          },
+        });
+      }
+    }
+
+    const adminUser = await prisma.user.findUnique({ where: { email: adminEmail } });
+    const adminRbacRole = roleByKey.get("ADMIN");
+    if (adminUser && adminRbacRole) {
+      await prisma.userRole.upsert({
+        where: {
+          userId_roleId: {
+            userId: adminUser.id,
+            roleId: adminRbacRole.id,
           },
         },
         update: {},
         create: {
-          roleId: role.id,
-          permissionId: permission.id,
-        },
-      });
-    }
-  }
-
-  const adminUser = await prisma.user.findUnique({ where: { email: adminEmail } });
-  const adminRbacRole = roleByKey.get("ADMIN");
-  if (adminUser && adminRbacRole) {
-    await prisma.userRole.upsert({
-      where: {
-        userId_roleId: {
           userId: adminUser.id,
           roleId: adminRbacRole.id,
         },
-      },
-      update: {},
-      create: {
-        userId: adminUser.id,
-        roleId: adminRbacRole.id,
-      },
-    });
-  }
+      });
+    }
 
-  for (const department of supportDepartments) {
-    const dbDepartment = await prisma.department.upsert({
-      where: { key: department.key },
-      update: {
-        name: department.name,
-        isActive: true,
-        deletedAt: null,
-      },
-      create: {
-        key: department.key,
-        name: department.name,
-        isActive: true,
-      },
-    });
-
-    for (const sla of defaultSla) {
-      await prisma.slaPolicy.upsert({
-        where: {
-          departmentId_priority: {
-            departmentId: dbDepartment.id,
-            priority: sla.priority,
-          },
-        },
+    for (const department of supportDepartments) {
+      const dbDepartment = await prisma.department.upsert({
+        where: { key: department.key },
         update: {
-          firstResponseMinutes: sla.firstResponseMinutes,
-          resolutionMinutes: sla.resolutionMinutes,
+          name: department.name,
           isActive: true,
+          deletedAt: null,
         },
         create: {
-          departmentId: dbDepartment.id,
-          priority: sla.priority,
-          firstResponseMinutes: sla.firstResponseMinutes,
-          resolutionMinutes: sla.resolutionMinutes,
+          key: department.key,
+          name: department.name,
           isActive: true,
         },
       });
+
+      for (const sla of defaultSla) {
+        await prisma.slaPolicy.upsert({
+          where: {
+            departmentId_priority: {
+              departmentId: dbDepartment.id,
+              priority: sla.priority,
+            },
+          },
+          update: {
+            firstResponseMinutes: sla.firstResponseMinutes,
+            resolutionMinutes: sla.resolutionMinutes,
+            isActive: true,
+          },
+          create: {
+            departmentId: dbDepartment.id,
+            priority: sla.priority,
+            firstResponseMinutes: sla.firstResponseMinutes,
+            resolutionMinutes: sla.resolutionMinutes,
+            isActive: true,
+          },
+        });
+      }
     }
+  } else {
+    console.log("Support RBAC models are not present in current Prisma schema. Skipping Support 2.0 RBAC seed.");
   }
 
   console.log(`Seed complete. Admin email: ${adminEmail}`);
