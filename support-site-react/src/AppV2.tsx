@@ -32,6 +32,8 @@ type AuthUser = {
   role: string;
 };
 
+const SUPPORT_TOKEN_KEY = "tellnab_support_auth_token";
+
 const PRIMARY_API_BASE =
   (window as any).SUPPORT_API_BASE ||
   `${window.location.origin.replace(/\/$/, "")}/api`;
@@ -73,6 +75,7 @@ const API_BASE_CANDIDATES = Array.from(
           ...((window as any).SUPPORT_API_BASE
             ? [String((window as any).SUPPORT_API_BASE)]
             : []),
+          "https://tellnab.com/api",
           "https://tellnab.onrender.com/api",
         ]),
   ]),
@@ -131,7 +134,26 @@ function extractAuthUser(payload: unknown): AuthUser | null {
   return null;
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+function extractAuthToken(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as {
+    token?: unknown;
+    data?: { token?: unknown };
+  };
+
+  if (typeof root.token === "string" && root.token.trim()) return root.token;
+  if (root.data && typeof root.data.token === "string" && root.data.token.trim()) {
+    return root.data.token;
+  }
+
+  return null;
+}
+
+async function apiRequest<T>(
+  path: string,
+  init?: RequestInit,
+  authToken?: string | null,
+): Promise<T> {
   let response: Response | null = null;
   let payload: unknown = null;
   let lastError: unknown = null;
@@ -151,6 +173,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         headers: {
           "content-type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
           ...(init?.headers || {}),
         },
         credentials: "include",
@@ -189,14 +212,18 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   const contentType = response.headers.get("content-type")?.toLowerCase() || "";
-  const fallbackMessage = response.ok && !contentType.includes("application/json")
-    ? `Support request failed: ${lastBase}${path} returned non-JSON content (likely HTML).`
-    : `Support request failed (${response.status}) via ${lastBase}${path}`;
+  const fallbackMessage =
+    response.ok && !contentType.includes("application/json")
+      ? `Support request failed: ${lastBase}${path} returned non-JSON content (likely HTML).`
+      : `Support request failed (${response.status}) via ${lastBase}${path}`;
   throw new Error(getErrorMessage(payload as ApiError | null, fallbackMessage));
 }
 
 export default function AppV2() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(
+    () => window.localStorage.getItem(SUPPORT_TOKEN_KEY) || null,
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -217,7 +244,7 @@ export default function AppV2() {
 
   const refreshSession = async () => {
     try {
-      const session = await apiRequest<unknown>("/auth/me");
+      const session = await apiRequest<unknown>("/auth/me", undefined, authToken);
       const user = extractAuthUser(session);
       if (!user) {
         setAuthUser(null);
@@ -274,12 +301,17 @@ export default function AppV2() {
       const login = await apiRequest<unknown>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), password }),
-      });
+      }, authToken);
+      const token = extractAuthToken(login);
+      if (token) {
+        setAuthToken(token);
+        window.localStorage.setItem(SUPPORT_TOKEN_KEY, token);
+      }
       let user = extractAuthUser(login);
       if (!user) {
         // Some hosts/proxies may return a minimal success payload.
         // Cookie is still set, so confirm via /auth/me before failing.
-        user = await refreshSession();
+        user = await apiRequest<unknown>("/auth/me", undefined, token || authToken).then(extractAuthUser);
       }
       if (!user) {
         throw new Error(
@@ -309,6 +341,8 @@ export default function AppV2() {
     try {
       const json = await apiRequest<TicketResponse | null>(
         "/tickets?page=1&page_size=50",
+        undefined,
+        authToken,
       );
       const rows = Array.isArray(json?.data) ? json.data : [];
       setTickets(rows);
@@ -333,7 +367,7 @@ export default function AppV2() {
       await apiRequest(`/tickets/${encodeURIComponent(selected.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: nextStatus }),
-      });
+      }, authToken);
       setTone("ok");
       setStatus(`Ticket updated to ${nextStatus}.`);
       await loadTickets();
@@ -373,7 +407,7 @@ export default function AppV2() {
           description: newDescription.trim(),
           priority: newPriority,
         }),
-      });
+      }, authToken);
       setTone("ok");
       setStatus("Ticket created successfully.");
       setNewSubject("");
