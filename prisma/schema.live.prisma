@@ -49,6 +49,8 @@ model User {
   reviewedJoinRequests GroupJoinRequest[] @relation("GroupJoinReviewer")
   groupModerationActions GroupModerationAction[]
   resolvedSupportTickets SupportTicket[] @relation("SupportTicketResolver")
+  assignedSupportTickets SupportTicket[] @relation("SupportTicketAssignee")
+  supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageSender")
 }
 
 model SupportTicket {
@@ -74,10 +76,33 @@ model SupportTicket {
   resolvedById String?
   resolvedBy   User? @relation("SupportTicketResolver", fields: [resolvedById], references: [id])
 
+  assignedToId String?
+  assignedTo   User? @relation("SupportTicketAssignee", fields: [assignedToId], references: [id])
+
+  messages SupportTicketMessage[]
+
   @@index([status, createdAt])
   @@index([priority, status, createdAt])
   @@index([type, createdAt])
   @@index([requesterEmail, createdAt])
+  @@index([assignedToId, status, updatedAt])
+}
+
+model SupportTicketMessage {
+  id          String   @id @default(cuid())
+  ticketId    String
+  senderType  String
+  senderName  String?
+  senderEmail String?
+  senderUserId String?
+  body        String
+  createdAt   DateTime @default(now())
+
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderUser  User? @relation("SupportTicketMessageSender", fields: [senderUserId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@index([senderType, createdAt])
 }
 
 model Category {

@@ -337,6 +337,31 @@ button:disabled {
   align-content: start;
 }
 
+.support-ops-sidebar {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ops-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #11182c 0%, #0e1425 100%);
+  padding: 0.6rem;
+}
+
+.ops-card h4 {
+  margin: 0 0 0.35rem;
+}
+
+.ops-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .chat-overlay {
   position: fixed;
   inset: 0;

@@ -84,6 +84,18 @@ const statusItems = [
   },
 ];
 
+const supportRules = [
+  "Acknowledge every new urgent ticket within 15 minutes.",
+  "Set ticket status before sending a reply.",
+  "Keep internal notes factual and action-based.",
+];
+
+const responseClauses = [
+  "I understand the issue and I am checking this now.",
+  "I have applied a fix. Please refresh and confirm.",
+  "I escalated this to engineering and will update you shortly.",
+];
+
 function normalizeValidationMessage(apiError: any) {
   if (!apiError || typeof apiError !== "object") return null;
   if (
@@ -581,7 +593,11 @@ export default function App() {
     }
   }
 
-  async function saveAgentTicketControls(assignToMe = false, unassign = false) {
+  async function saveAgentTicketControls(
+    assignToMe = false,
+    unassign = false,
+    statusOverride?: SupportStatus,
+  ) {
     if (!agentSelectedTicket) return;
 
     try {
@@ -590,7 +606,7 @@ export default function App() {
         {
           method: "PATCH",
           body: JSON.stringify({
-            status: ticketStatusDraft,
+            status: statusOverride || ticketStatusDraft,
             priority: ticketPriorityDraft,
             ...(assignToMe && agentUser ? { assignedToId: agentUser.id } : {}),
             ...(unassign ? { assignedToId: null } : {}),
@@ -1008,6 +1024,10 @@ export default function App() {
                       Requester: {agentSelectedTicket.requesterName} •{" "}
                       {agentSelectedTicket.requesterEmail}
                     </p>
+                    <p className="ticket-meta">
+                      Handling:{" "}
+                      {agentSelectedTicket.assignedTo?.name || "Unassigned"}
+                    </p>
 
                     <div className="grid two compact">
                       <label>
@@ -1064,7 +1084,46 @@ export default function App() {
                       >
                         Unassign
                       </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          saveAgentTicketControls(false, false, "CLOSED")
+                        }
+                      >
+                        Close ticket
+                      </button>
                     </div>
+
+                    <aside className="support-ops-sidebar">
+                      <article className="ops-card">
+                        <h4>Support settings</h4>
+                        <p className="subtle">
+                          Owner:{" "}
+                          {agentSelectedTicket.assignedTo?.name || "Unassigned"}
+                        </p>
+                        <p className="subtle">
+                          Priority: {ticketPriorityDraft} • Status:{" "}
+                          {ticketStatusDraft}
+                        </p>
+                      </article>
+                      <article className="ops-card">
+                        <h4>Support rules</h4>
+                        <ul>
+                          {supportRules.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </article>
+                      <article className="ops-card">
+                        <h4>Approved clauses</h4>
+                        <ul>
+                          {responseClauses.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </article>
+                    </aside>
 
                     <div className="thread-list">
                       {agentMessages.map((item) => (

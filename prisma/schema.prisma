@@ -49,6 +49,275 @@ model User {
   reviewedJoinRequests GroupJoinRequest[] @relation("GroupJoinReviewer")
   groupModerationActions GroupModerationAction[]
   resolvedSupportTickets SupportTicket[] @relation("SupportTicketResolver")
+  assignedSupportTickets SupportTicket[] @relation("SupportTicketAssignee")
+  supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageSender")
+
+  // Support v2 RBAC + ticketing relations
+  userRoles                  UserRole[]
+  ticketsAsCustomer          Ticket[]                 @relation("TicketCustomer")
+  ticketsAsAssignedAgent     Ticket[]                 @relation("TicketAssignedAgent")
+  ticketMessagesV2           TicketMessage[]
+  ticketInternalNotes        TicketInternalNote[]
+  ticketActivities           TicketActivityLog[]
+  cannedResponses            CannedResponse[]
+  ticketFeedbacksGiven       TicketFeedback[]         @relation("TicketFeedbackGiver")
+  ticketFeedbacksReviewed    TicketFeedback[]         @relation("TicketFeedbackReviewer")
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  name        String
+  description String?
+  isSystem    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  name        String
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+
+  roles       RolePermission[]
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String   @id @default(cuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  tickets         Ticket[]
+  cannedResponses CannedResponse[]
+  slaPolicies     SlaPolicy[]
+  automationRules AutomationRule[]
+}
+
+model Ticket {
+  id              String   @id @default(cuid())
+  ticketNumber    String   @unique
+  subject         String
+  description     String
+  status          String   @default("NEW")
+  priority        String   @default("MEDIUM")
+  departmentId    String
+  customerId      String
+  assignedAgentId String?
+  escalatedAt     DateTime?
+  closedAt        DateTime?
+  reopenedAt      DateTime?
+  firstResponseAt DateTime?
+  resolutionAt    DateTime?
+  slaDueAt        DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  department    Department @relation(fields: [departmentId], references: [id])
+  customer      User       @relation("TicketCustomer", fields: [customerId], references: [id])
+  assignedAgent User?      @relation("TicketAssignedAgent", fields: [assignedAgentId], references: [id])
+
+  messages      TicketMessage[]
+  internalNotes TicketInternalNote[]
+  activityLogs  TicketActivityLog[]
+  attachments   TicketAttachment[]
+  tags          TicketTag[]
+  feedbacks     TicketFeedback[]
+
+  @@index([status, priority, createdAt])
+  @@index([departmentId, status, updatedAt])
+  @@index([assignedAgentId, status, slaDueAt])
+  @@index([customerId, createdAt])
+}
+
+model TicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  senderId   String
+  senderRole String
+  body       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  ticket      Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender      User                @relation(fields: [senderId], references: [id])
+  attachments TicketAttachment[]
+
+  @@index([ticketId, createdAt])
+}
+
+model TicketInternalNote {
+  id        String   @id @default(cuid())
+  ticketId  String
+  userId    String
+  note      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId, createdAt])
+}
+
+model TicketActivityLog {
+  id          String   @id @default(cuid())
+  ticketId    String
+  action      String
+  performedBy String
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  performer User   @relation(fields: [performedBy], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@index([performedBy, createdAt])
+}
+
+model TicketAttachment {
+  id          String   @id @default(cuid())
+  ticketId    String
+  messageId   String?
+  fileName    String
+  storagePath String
+  mimeType    String
+  sizeBytes   Int
+  createdAt   DateTime @default(now())
+
+  ticket  Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  message TicketMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  tickets TicketTag[]
+}
+
+model TicketTag {
+  id        String   @id @default(cuid())
+  ticketId  String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, tagId])
+  @@index([tagId])
+}
+
+model TicketFeedback {
+  id           String   @id @default(cuid())
+  ticketId      String
+  rating       Int
+  comment      String?
+  createdById  String
+  reviewedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ticket     Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdBy  User   @relation("TicketFeedbackGiver", fields: [createdById], references: [id])
+  reviewedBy User?  @relation("TicketFeedbackReviewer", fields: [reviewedById], references: [id])
+
+  @@unique([ticketId, createdById])
+}
+
+model CannedResponse {
+  id           String   @id @default(cuid())
+  departmentId String?
+  title        String
+  body         String
+  isActive     Boolean  @default(true)
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  department Department? @relation(fields: [departmentId], references: [id])
+  createdBy  User        @relation(fields: [createdById], references: [id])
+
+  @@index([departmentId, isActive])
+}
+
+model SlaPolicy {
+  id                   String   @id @default(cuid())
+  departmentId         String
+  priority             String
+  firstResponseMinutes Int
+  resolutionMinutes    Int
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, priority])
+}
+
+model AutomationRule {
+  id           String   @id @default(cuid())
+  departmentId String?
+  name         String
+  triggerType  String
+  conditions   String
+  actions      String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department? @relation(fields: [departmentId], references: [id])
+
+  @@index([departmentId, isActive])
 }
 
 model SupportTicket {
@@ -74,10 +343,33 @@ model SupportTicket {
   resolvedById String?
   resolvedBy   User? @relation("SupportTicketResolver", fields: [resolvedById], references: [id])
 
+  assignedToId String?
+  assignedTo   User? @relation("SupportTicketAssignee", fields: [assignedToId], references: [id])
+
+  messages SupportTicketMessage[]
+
   @@index([status, createdAt])
   @@index([priority, status, createdAt])
   @@index([type, createdAt])
   @@index([requesterEmail, createdAt])
+  @@index([assignedToId, status, updatedAt])
+}
+
+model SupportTicketMessage {
+  id          String   @id @default(cuid())
+  ticketId    String
+  senderType  String
+  senderName  String?
+  senderEmail String?
+  senderUserId String?
+  body        String
+  createdAt   DateTime @default(now())
+
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderUser  User? @relation("SupportTicketMessageSender", fields: [senderUserId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@index([senderType, createdAt])
 }
 
 model Category {

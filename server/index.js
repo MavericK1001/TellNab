@@ -18,9 +18,11 @@ const bcrypt = require("bcryptjs");
 const rateLimit = require("express-rate-limit");
 const { z } = require("zod");
 const { PrismaClient } = require("@prisma/client");
+const { createSupportModule } = require("../modules/Support");
 
 const ROLES = {
   MEMBER: "MEMBER",
+  SUPPORT_MEMBER: "SUPPORT_MEMBER",
   MODERATOR: "MODERATOR",
   ADMIN: "ADMIN",
 };
@@ -124,6 +126,9 @@ const AI_ASSIST_MODE = String(process.env.AI_ASSIST_MODE || "mock").toLowerCase(
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const SUPPORT_PORTAL_URL = process.env.SUPPORT_PORTAL_URL || "https://support.tellnab.com";
 const SUPPORT_EMAIL_WEBHOOK_URL = process.env.SUPPORT_EMAIL_WEBHOOK_URL || "";
+const SUPPORT_SUBDOMAIN = String(process.env.SUPPORT_SUBDOMAIN || "support.tellnab.com").toLowerCase();
+const ENABLE_LEGACY_SUPPORT = String(process.env.ENABLE_LEGACY_SUPPORT || "false").toLowerCase() === "true";
+const AUTH_COOKIE_DOMAIN = String(process.env.AUTH_COOKIE_DOMAIN || "").trim();
 
 const WALLET_BALANCE_TYPES = {
   PAID: "PAID",
@@ -211,6 +216,7 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json({ limit: "32kb" }));
+app.locals.prisma = prisma;
 
 const authLimiter = rateLimit({
   windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
@@ -253,6 +259,25 @@ function createToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, {
     expiresIn: TOKEN_EXPIRY,
   });
+}
+
+function buildAuthCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 1000 * 60 * 60 * 12,
+    ...(AUTH_COOKIE_DOMAIN ? { domain: AUTH_COOKIE_DOMAIN } : {}),
+  };
+}
+
+function buildAuthClearCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    ...(AUTH_COOKIE_DOMAIN ? { domain: AUTH_COOKIE_DOMAIN } : {}),
+  };
 }
 
 function sanitizeUser(user) {
@@ -307,6 +332,42 @@ function moderatorOrAdminRequired(req, res, next) {
     return res.status(403).json({ message: "Forbidden" });
   }
   return next();
+}
+
+function supportStaffRequired(req, res, next) {
+  if (
+    !req.user ||
+    (req.user.role !== ROLES.ADMIN &&
+      req.user.role !== ROLES.MODERATOR &&
+      req.user.role !== ROLES.SUPPORT_MEMBER)
+  ) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  return next();
+}
+
+if (String(process.env.ENABLE_SUPPORT_V2 || "true").toLowerCase() !== "false") {
+  const supportModuleRouter = createSupportModule({ authRequired });
+
+  function getRequestHost(req) {
+    const rawForwarded = req.headers["x-forwarded-host"];
+    const forwardedHost =
+      typeof rawForwarded === "string" ? rawForwarded.split(",")[0].trim() : "";
+    const host = (forwardedHost || req.headers.host || "").toLowerCase();
+    return host.split(":")[0];
+  }
+
+  function isSupportSubdomainRequest(req) {
+    return getRequestHost(req) === SUPPORT_SUBDOMAIN;
+  }
+
+  // Support 2.0 loads only when request host matches SUPPORT_SUBDOMAIN.
+  app.use((req, res, next) => {
+    if (!isSupportSubdomainRequest(req)) {
+      return next();
+    }
+    return supportModuleRouter(req, res, next);
+  });
 }
 
 function sanitizeAdvice(advice) {
@@ -1179,6 +1240,7 @@ function serializeSupportTicket(ticket) {
   const priority = ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL;
   const firstResponseDueAt = ticket.firstResponseDueAt || null;
   const firstResponseAt = ticket.firstResponseAt || null;
+  const supportAssignmentMeta = extractSupportAssigneeFromInternalNote(ticket.internalNote);
   const isAwaitingFirstResponse = !firstResponseAt;
   const isSlaBreached = Boolean(
     isAwaitingFirstResponse &&
@@ -1203,9 +1265,9 @@ function serializeSupportTicket(ticket) {
     firstResponseDueAt,
     firstResponseAt,
     isSlaBreached,
-    internalNote: ticket.internalNote,
+    internalNote: supportAssignmentMeta.internalNote,
     resolutionSummary: ticket.resolutionSummary,
-    assignedTo: ticket.assignedTo || null,
+    assignedTo: ticket.assignedTo || supportAssignmentMeta.assignedTo || null,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     resolvedAt: ticket.resolvedAt,
@@ -1230,6 +1292,48 @@ function buildSupportTranscriptLine(label, text) {
   const safeText = String(text || "").trim();
   const safeLabel = String(label || "Support").trim();
   return `[${new Date().toISOString()}] ${safeLabel}: ${safeText}`;
+}
+
+function normalizeSupportTagValue(value) {
+  return String(value || "")
+    .replace(/[|\]\n\r]/g, " ")
+    .trim();
+}
+
+function extractSupportAssigneeFromInternalNote(internalNote) {
+  const note = typeof internalNote === "string" ? internalNote : "";
+  const match = note.match(/\[assigned_to:([^|\]]+)\|([^|\]]*)\|([^|\]]*)\]/i);
+
+  const cleanInternalNote = note.replace(/\[assigned_to:[^\]]+\]/gi, "").trim();
+
+  if (!match) {
+    return {
+      assignedTo: null,
+      internalNote: cleanInternalNote || null,
+    };
+  }
+
+  return {
+    assignedTo: {
+      id: normalizeSupportTagValue(match[1]),
+      name: normalizeSupportTagValue(match[2]) || "Support",
+      role: normalizeSupportTagValue(match[3]) || ROLES.SUPPORT_MEMBER,
+    },
+    internalNote: cleanInternalNote || null,
+  };
+}
+
+function mergeSupportAssignmentIntoInternalNote(internalNote, assignee) {
+  const { internalNote: clean } = extractSupportAssigneeFromInternalNote(internalNote);
+  if (!assignee) {
+    return clean || null;
+  }
+
+  const tag = `[assigned_to:${normalizeSupportTagValue(assignee.id)}|${normalizeSupportTagValue(
+    assignee.name,
+  )}|${normalizeSupportTagValue(assignee.role)}]`;
+
+  return clean ? `${tag}\n${clean}` : tag;
 }
 
 function socialFallbackName(provider) {
@@ -1347,11 +1451,15 @@ const profilePasswordUpdateSchema = z.object({
 });
 
 const roleUpdateSchema = z.object({
-  role: z.enum([ROLES.MEMBER, ROLES.MODERATOR, ROLES.ADMIN]),
+  role: z.enum([ROLES.MEMBER, ROLES.SUPPORT_MEMBER, ROLES.MODERATOR, ROLES.ADMIN]),
 });
 
 const statusUpdateSchema = z.object({
   isActive: z.boolean(),
+});
+
+const supportMemberUpdateSchema = z.object({
+  isSupportMember: z.boolean(),
 });
 
 const createAdviceSchema = z.object({
@@ -1586,6 +1694,7 @@ app.get("/", (_req, res) => {
   });
 });
 
+if (ENABLE_LEGACY_SUPPORT) {
 app.post("/api/support/tickets", supportCreateLimiter, async (req, res) => {
   try {
     const data = supportTicketCreateSchema.parse(req.body || {});
@@ -1869,7 +1978,7 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
   }
 });
 
-app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequired, async (req, res) => {
+app.patch("/api/admin/support/tickets/:id", authRequired, supportStaffRequired, async (req, res) => {
   try {
     const data = supportTicketAdminUpdateSchema.parse(req.body || {});
     const existing = await prisma.supportTicket.findUnique({ where: { id: req.params.id } });
@@ -1988,7 +2097,7 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
   }
 });
 
-app.get("/api/support/agent/me", authRequired, moderatorOrAdminRequired, async (req, res) => {
+app.get("/api/support/agent/me", authRequired, supportStaffRequired, async (req, res) => {
   return res.json({
     user: {
       id: req.user.id,
@@ -1999,7 +2108,7 @@ app.get("/api/support/agent/me", authRequired, moderatorOrAdminRequired, async (
   });
 });
 
-app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, async (req, res) => {
+app.get("/api/support/agent/tickets", authRequired, supportStaffRequired, async (req, res) => {
   try {
     const status = typeof req.query.status === "string" ? req.query.status.trim().toUpperCase() : "";
     const type = typeof req.query.type === "string" ? req.query.type.trim().toUpperCase() : "";
@@ -2075,27 +2184,73 @@ app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, as
       console.error("[support] agent ticket list primary query failed, using fallback", primaryError);
     }
 
-    const fallbackTickets = await prisma.supportTicket.findMany({
-      where,
-      orderBy: [{ updatedAt: "desc" }],
-      take: limit,
-      select: {
-        id: true,
-        type: true,
-        priority: true,
-        status: true,
-        requesterName: true,
-        requesterEmail: true,
-        subject: true,
-        message: true,
-        pageUrl: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const { assignedToId, ...whereWithoutAssignment } = where;
+
+    let fallbackTickets = [];
+    try {
+      fallbackTickets = await prisma.supportTicket.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }],
+        take: limit,
+        select: {
+          id: true,
+          type: true,
+          priority: true,
+          status: true,
+          requesterName: true,
+          requesterEmail: true,
+          subject: true,
+          message: true,
+          pageUrl: true,
+          internalNote: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    } catch (fallbackQueryError) {
+      console.error("[support] agent ticket list fallback query failed, using assignment-less query", fallbackQueryError);
+      fallbackTickets = await prisma.supportTicket.findMany({
+        where: whereWithoutAssignment,
+        orderBy: [{ updatedAt: "desc" }],
+        take: limit,
+        select: {
+          id: true,
+          type: true,
+          priority: true,
+          status: true,
+          requesterName: true,
+          requesterEmail: true,
+          subject: true,
+          message: true,
+          pageUrl: true,
+          internalNote: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    }
+
+    const normalizedFallbackTickets = fallbackTickets
+      .map((ticket) => {
+        const assignmentMeta = extractSupportAssigneeFromInternalNote(ticket.internalNote);
+        return {
+          ...ticket,
+          assignedTo: assignmentMeta.assignedTo,
+          internalNote: assignmentMeta.internalNote,
+        };
+      })
+      .filter((ticket) => {
+        if (assigned === "mine") {
+          return ticket.assignedTo && ticket.assignedTo.id === req.user.id;
+        }
+        if (assigned === "unassigned") {
+          return !ticket.assignedTo;
+        }
+        return true;
+      });
 
     return res.json({
-      tickets: fallbackTickets.map((ticket) => ({
+      tickets: normalizedFallbackTickets.map((ticket) => ({
         id: ticket.id,
         type: ticket.type,
         priority: ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL,
@@ -2110,9 +2265,9 @@ app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, as
         firstResponseDueAt: null,
         firstResponseAt: null,
         isSlaBreached: false,
-        internalNote: null,
+        internalNote: ticket.internalNote || null,
         resolutionSummary: null,
-        assignedTo: null,
+        assignedTo: ticket.assignedTo || null,
         createdAt: ticket.createdAt,
         updatedAt: ticket.updatedAt,
         resolvedAt: null,
@@ -2125,7 +2280,7 @@ app.get("/api/support/agent/tickets", authRequired, moderatorOrAdminRequired, as
   }
 });
 
-app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired, async (req, res) => {
+app.get("/api/support/agent/tickets/:id", authRequired, supportStaffRequired, async (req, res) => {
   try {
     try {
       const ticket = await prisma.supportTicket.findUnique({
@@ -2167,6 +2322,7 @@ app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired
         subject: true,
         message: true,
         pageUrl: true,
+        internalNote: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -2175,6 +2331,8 @@ app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired
     if (!fallbackTicket) {
       return res.status(404).json({ message: "Support ticket not found" });
     }
+
+    const assignmentMeta = extractSupportAssigneeFromInternalNote(fallbackTicket.internalNote);
 
     let messages = [];
     try {
@@ -2218,9 +2376,9 @@ app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired
         firstResponseDueAt: null,
         firstResponseAt: null,
         isSlaBreached: false,
-        internalNote: null,
+        internalNote: assignmentMeta.internalNote,
         resolutionSummary: null,
-        assignedTo: null,
+        assignedTo: assignmentMeta.assignedTo,
         createdAt: fallbackTicket.createdAt,
         updatedAt: fallbackTicket.updatedAt,
         resolvedAt: null,
@@ -2233,7 +2391,7 @@ app.get("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired
   }
 });
 
-app.patch("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequired, async (req, res) => {
+app.patch("/api/support/agent/tickets/:id", authRequired, supportStaffRequired, async (req, res) => {
   try {
     const data = supportTicketAdminUpdateSchema.parse(req.body || {});
     const existing = await prisma.supportTicket.findUnique({ where: { id: req.params.id } });
@@ -2244,8 +2402,13 @@ app.patch("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequir
 
     if (data.assignedToId) {
       const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId } });
-      if (!assignee || (assignee.role !== ROLES.ADMIN && assignee.role !== ROLES.MODERATOR)) {
-        return res.status(400).json({ message: "Assigned support user must be admin or moderator" });
+      if (
+        !assignee ||
+        (assignee.role !== ROLES.ADMIN &&
+          assignee.role !== ROLES.MODERATOR &&
+          assignee.role !== ROLES.SUPPORT_MEMBER)
+      ) {
+        return res.status(400).json({ message: "Assigned support user must be support staff" });
       }
     }
 
@@ -2257,39 +2420,135 @@ app.patch("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequir
       !existing.firstResponseAt &&
       (nextStatus === SUPPORT_TICKET_STATUS.IN_PROGRESS || shouldMarkResolved);
 
-    const updated = await prisma.supportTicket.update({
-      where: { id: existing.id },
-      data: {
+    let updated = null;
+    let assigneeForFallback = null;
+
+    try {
+      updated = await prisma.supportTicket.update({
+        where: { id: existing.id },
+        data: {
+          ...(data.status ? { status: data.status } : {}),
+          ...(data.priority ? { priority: data.priority } : {}),
+          ...(data.priority && !existing.firstResponseAt
+            ? {
+                firstResponseDueAt: new Date(
+                  new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
+                ),
+              }
+            : {}),
+          ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
+          ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
+          ...(data.resolutionSummary !== undefined
+            ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
+            : {}),
+          ...(data.assignedToId !== undefined
+            ? { assignedToId: normalizeOptionalText(data.assignedToId) }
+            : {}),
+          ...(shouldMarkResolved
+            ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
+            : { resolvedAt: null, resolvedById: null }),
+        },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+        },
+      });
+    } catch (primaryError) {
+      console.error("[support] agent ticket update primary flow failed, using fallback", primaryError);
+    }
+
+    if (!updated) {
+      const normalizedAssignedToId =
+        data.assignedToId !== undefined ? normalizeOptionalText(data.assignedToId) : undefined;
+
+      if (normalizedAssignedToId) {
+        const assignee = await prisma.user.findUnique({ where: { id: normalizedAssignedToId } });
+        if (!assignee) {
+          return res.status(400).json({ message: "Assigned support user was not found" });
+        }
+        assigneeForFallback = {
+          id: assignee.id,
+          name: assignee.name,
+          role: assignee.role,
+        };
+      }
+
+      const fallbackData = {
         ...(data.status ? { status: data.status } : {}),
         ...(data.priority ? { priority: data.priority } : {}),
-        ...(data.priority && !existing.firstResponseAt
-          ? {
-              firstResponseDueAt: new Date(
-                new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
-              ),
-            }
-          : {}),
-        ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
         ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
         ...(data.resolutionSummary !== undefined
           ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
           : {}),
-        ...(data.assignedToId !== undefined
-          ? { assignedToId: normalizeOptionalText(data.assignedToId) }
-          : {}),
-        ...(shouldMarkResolved
-          ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
-          : { resolvedAt: null, resolvedById: null }),
-      },
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        assignedTo: {
-          select: { id: true, name: true, role: true, email: true },
-        },
-      },
-    });
+        ...(normalizedAssignedToId !== undefined ? { assignedToId: normalizedAssignedToId } : {}),
+        ...(shouldMarkResolved ? { resolvedAt: existing.resolvedAt || new Date() } : { resolvedAt: null }),
+      };
+
+      try {
+        updated = await prisma.supportTicket.update({
+          where: { id: existing.id },
+          data: fallbackData,
+          select: {
+            id: true,
+            type: true,
+            priority: true,
+            status: true,
+            requesterName: true,
+            requesterEmail: true,
+            subject: true,
+            message: true,
+            pageUrl: true,
+            internalNote: true,
+            resolutionSummary: true,
+            createdAt: true,
+            updatedAt: true,
+            resolvedAt: true,
+          },
+        });
+      } catch (fallbackError) {
+        console.error("[support] agent ticket update fallback relation path failed", fallbackError);
+
+        if (normalizedAssignedToId !== undefined) {
+          try {
+            const noteBase =
+              data.internalNote !== undefined ? normalizeOptionalText(data.internalNote) : existing.internalNote;
+            updated = await prisma.supportTicket.update({
+              where: { id: existing.id },
+              data: {
+                ...fallbackData,
+                internalNote: mergeSupportAssignmentIntoInternalNote(noteBase, assigneeForFallback),
+              },
+              select: {
+                id: true,
+                type: true,
+                priority: true,
+                status: true,
+                requesterName: true,
+                requesterEmail: true,
+                subject: true,
+                message: true,
+                pageUrl: true,
+                internalNote: true,
+                resolutionSummary: true,
+                createdAt: true,
+                updatedAt: true,
+                resolvedAt: true,
+              },
+            });
+          } catch (legacyAssignmentError) {
+            console.error("[support] agent ticket update legacy assignment fallback failed", legacyAssignmentError);
+          }
+        }
+      }
+    }
+
+    if (!updated) {
+      return res.status(500).json({ message: "Failed to update support ticket" });
+    }
 
     return res.json({ ticket: serializeSupportTicket(updated) });
   } catch (error) {
@@ -2303,7 +2562,7 @@ app.patch("/api/support/agent/tickets/:id", authRequired, moderatorOrAdminRequir
 app.post(
   "/api/support/agent/tickets/:id/replies",
   authRequired,
-  moderatorOrAdminRequired,
+  supportStaffRequired,
   supportReplyLimiter,
   async (req, res) => {
   try {
@@ -2727,29 +2986,66 @@ app.post("/api/support/tickets/:id/close", async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    const updated = await prisma.supportTicket.update({
-      where: { id: existing.id },
-      data: {
-        status: SUPPORT_TICKET_STATUS.CLOSED,
-        resolvedAt: existing.resolvedAt || new Date(),
-      },
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
+    let updated = null;
+    try {
+      updated = await prisma.supportTicket.update({
+        where: { id: existing.id },
+        data: {
+          status: SUPPORT_TICKET_STATUS.CLOSED,
+          resolvedAt: existing.resolvedAt || new Date(),
         },
-        assignedTo: {
-          select: { id: true, name: true, role: true, email: true },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
         },
-      },
-    });
+      });
+    } catch (primaryError) {
+      console.error("[support] member close primary flow failed, using fallback", primaryError);
+    }
 
-    await prisma.supportTicketMessage.create({
-      data: {
-        ticketId: existing.id,
-        senderType: SUPPORT_MESSAGE_SENDER.SYSTEM,
-        body: "Ticket closed by member.",
-      },
-    });
+    if (!updated) {
+      updated = await prisma.supportTicket.update({
+        where: { id: existing.id },
+        data: {
+          status: SUPPORT_TICKET_STATUS.CLOSED,
+          resolvedAt: existing.resolvedAt || new Date(),
+        },
+        select: {
+          id: true,
+          type: true,
+          priority: true,
+          status: true,
+          requesterName: true,
+          requesterEmail: true,
+          subject: true,
+          message: true,
+          pageUrl: true,
+          internalNote: true,
+          resolutionSummary: true,
+          createdAt: true,
+          updatedAt: true,
+          resolvedAt: true,
+        },
+      });
+    }
+
+    try {
+      if (prisma.supportTicketMessage && typeof prisma.supportTicketMessage.create === "function") {
+        await prisma.supportTicketMessage.create({
+          data: {
+            ticketId: existing.id,
+            senderType: SUPPORT_MESSAGE_SENDER.SYSTEM,
+            body: "Ticket closed by member.",
+          },
+        });
+      }
+    } catch (messageError) {
+      console.error("[support] member close message logging failed", messageError);
+    }
 
     return res.json({ ticket: serializeSupportTicket(updated) });
   } catch (error) {
@@ -2759,6 +3055,7 @@ app.post("/api/support/tickets/:id/close", async (req, res) => {
     return res.status(500).json({ message: "Failed to close ticket" });
   }
 });
+}
 
 app.post("/api/auth/register", async (req, res) => {
   try {
@@ -2783,12 +3080,7 @@ app.post("/api/auth/register", async (req, res) => {
     });
 
     const token = createToken(user);
-    res.cookie("tn_auth", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 12,
-    });
+    res.cookie("tn_auth", token, buildAuthCookieOptions());
 
     return res.status(201).json({ user: sanitizeUser(user), token });
   } catch (error) {
@@ -2822,12 +3114,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = createToken(user);
-    res.cookie("tn_auth", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 12,
-    });
+    res.cookie("tn_auth", token, buildAuthCookieOptions());
 
     return res.json({ user: sanitizeUser(user), token });
   } catch (error) {
@@ -2974,12 +3261,7 @@ app.post("/api/auth/social/google-code", async (req, res) => {
     }
 
     const token = createToken(user);
-    res.cookie("tn_auth", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 12,
-    });
+    res.cookie("tn_auth", token, buildAuthCookieOptions());
 
     return res.json({ user: sanitizeUser(user), token });
   } catch (error) {
@@ -2991,7 +3273,7 @@ app.post("/api/auth/social/google-code", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (_req, res) => {
-  res.clearCookie("tn_auth");
+  res.clearCookie("tn_auth", buildAuthClearCookieOptions());
   return res.json({ success: true });
 });
 
@@ -3418,6 +3700,44 @@ app.patch("/api/admin/users/:id/role", authRequired, adminRequired, async (req, 
     return res.status(500).json({ message: "Role update failed" });
   }
 });
+
+app.patch(
+  "/api/moderation/users/:id/support-role",
+  authRequired,
+  moderatorOrAdminRequired,
+  async (req, res) => {
+    try {
+      const { isSupportMember } = supportMemberUpdateSchema.parse(req.body || {});
+      const { id } = req.params;
+
+      const target = await prisma.user.findUnique({ where: { id } });
+      if (!target) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (req.user.role !== ROLES.ADMIN && (target.role === ROLES.ADMIN || target.role === ROLES.MODERATOR)) {
+        return res.status(403).json({ message: "Only admins can change staff role for admins/moderators" });
+      }
+
+      if (target.role === ROLES.ADMIN || target.role === ROLES.MODERATOR) {
+        return res.status(400).json({ message: "Admin and moderator accounts are already support staff" });
+      }
+
+      const nextRole = isSupportMember ? ROLES.SUPPORT_MEMBER : ROLES.MEMBER;
+      const user = await prisma.user.update({
+        where: { id },
+        data: { role: nextRole },
+      });
+
+      return res.json({ user: sanitizeUser(user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", issues: error.issues });
+      }
+      return res.status(500).json({ message: "Support role update failed" });
+    }
+  },
+);
 
 app.patch("/api/admin/users/:id/status", authRequired, adminRequired, async (req, res) => {
   try {

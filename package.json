@@ -23,7 +23,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:dbpush:live": "prisma db push --accept-data-loss --schema prisma/schema.live.prisma",
-    "prisma:seed": "node prisma/seed.js"
+    "prisma:seed": "node prisma/seed.js",
+    "support2:seed": "node modules/Support/Database/Seeders/20260220_seed_support_roles_permissions.js",
+    "support2:migration:info": "echo 'Run SQL files in modules/Support/Database/Migrations in deployment pipeline'"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
