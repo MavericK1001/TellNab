@@ -40,6 +40,26 @@ const IS_LOCAL_HOST =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1";
 
+function isLoopbackHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function isAllowedStoredApiBase(value: string | null) {
+  if (!value) return false;
+
+  try {
+    const parsed = new URL(value, window.location.origin);
+
+    if (IS_LOCAL_HOST) {
+      return true;
+    }
+
+    return !isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 const API_BASE_CANDIDATES = Array.from(
   new Set([
     ...(IS_LOCAL_HOST
@@ -53,7 +73,6 @@ const API_BASE_CANDIDATES = Array.from(
           PRIMARY_API_BASE,
           "/api",
           "https://tellnab.onrender.com/api",
-          "http://127.0.0.1:4000/api",
         ]),
   ]),
 );
@@ -61,7 +80,14 @@ const API_BASE_CANDIDATES = Array.from(
 let preferredApiBase: string | null = null;
 
 try {
-  preferredApiBase = window.sessionStorage.getItem("tellnab_support_api_base");
+  const storedApiBase = window.sessionStorage.getItem("tellnab_support_api_base");
+  preferredApiBase = isAllowedStoredApiBase(storedApiBase)
+    ? storedApiBase
+    : null;
+
+  if (!preferredApiBase && storedApiBase) {
+    window.sessionStorage.removeItem("tellnab_support_api_base");
+  }
 } catch {
   preferredApiBase = null;
 }
