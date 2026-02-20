@@ -67,8 +67,18 @@ function isAuthUser(value: unknown): value is AuthUser {
 
 function extractAuthUser(payload: unknown): AuthUser | null {
   if (!payload || typeof payload !== "object") return null;
-  const maybeUser = (payload as { user?: unknown }).user;
-  return isAuthUser(maybeUser) ? maybeUser : null;
+  const root = payload as {
+    user?: unknown;
+    data?: { user?: unknown; me?: unknown };
+    me?: unknown;
+  };
+
+  if (isAuthUser(root.user)) return root.user;
+  if (isAuthUser(root.me)) return root.me;
+  if (root.data && isAuthUser(root.data.user)) return root.data.user;
+  if (root.data && isAuthUser(root.data.me)) return root.data.me;
+
+  return null;
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -87,7 +97,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
         credentials: "include",
       });
 
-      const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+      const contentType =
+        response.headers.get("content-type")?.toLowerCase() || "";
       const isJsonResponse = contentType.includes("application/json");
 
       if (isJsonResponse) {
@@ -108,7 +119,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw (lastError as Error) || new Error("Support API is not reachable.");
   }
 
-  throw new Error(getErrorMessage(payload as ApiError | null, "Support request failed."));
+  throw new Error(
+    getErrorMessage(payload as ApiError | null, "Support request failed."),
+  );
 }
 
 export default function AppV2() {
@@ -152,14 +165,20 @@ export default function AppV2() {
       const user = await refreshSession();
       if (!user) {
         setTone("error");
-        setStatus("No active session found. Sign in first on tellnab.com or here.");
+        setStatus(
+          "No active session found. Sign in first on tellnab.com or here.",
+        );
         return;
       }
       setTone("ok");
       setStatus(`Session found for ${user.name}.`);
     } catch (error) {
       setTone("error");
-      setStatus(error instanceof Error ? error.message : "Could not read existing session.");
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Could not read existing session.",
+      );
     } finally {
       setLoading(false);
     }
@@ -180,9 +199,16 @@ export default function AppV2() {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const user = extractAuthUser(login);
+      let user = extractAuthUser(login);
       if (!user) {
-        throw new Error("Login succeeded but user session payload is invalid.");
+        // Some hosts/proxies may return a minimal success payload.
+        // Cookie is still set, so confirm via /auth/me before failing.
+        user = await refreshSession();
+      }
+      if (!user) {
+        throw new Error(
+          "Signed in, but session cookie is not available on this subdomain. Set AUTH_COOKIE_DOMAIN=.tellnab.com",
+        );
       }
       setAuthUser(user);
       setTone("ok");
