@@ -32,9 +32,18 @@ type AuthUser = {
   role: string;
 };
 
-const API_BASE =
+const PRIMARY_API_BASE =
   (window as any).SUPPORT_API_BASE ||
   `${window.location.origin.replace(/\/$/, "")}/api`;
+
+const API_BASE_CANDIDATES = Array.from(
+  new Set([
+    PRIMARY_API_BASE,
+    "/api",
+    "https://tellnab.onrender.com/api",
+    "http://127.0.0.1:4000/api",
+  ]),
+);
 
 function getErrorMessage(payload: ApiError | null, fallback: string) {
   if (!payload) return fallback;
@@ -63,22 +72,43 @@ function extractAuthUser(payload: unknown): AuthUser | null {
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers || {}),
-    },
-    credentials: "include",
-  });
+  let response: Response | null = null;
+  let payload: unknown = null;
+  let lastError: unknown = null;
 
-  const payload = (await response.json().catch(() => null)) as ApiError | null;
+  for (const base of API_BASE_CANDIDATES) {
+    try {
+      response = await fetch(`${base}${path}`, {
+        ...init,
+        headers: {
+          "content-type": "application/json",
+          ...(init?.headers || {}),
+        },
+        credentials: "include",
+      });
 
-  if (!response.ok) {
-    throw new Error(getErrorMessage(payload, "Support request failed."));
+      const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+      const isJsonResponse = contentType.includes("application/json");
+
+      if (isJsonResponse) {
+        payload = await response.json().catch(() => null);
+      } else {
+        payload = null;
+      }
+
+      if (response.ok && isJsonResponse) {
+        return payload as T;
+      }
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  return payload as T;
+  if (!response) {
+    throw (lastError as Error) || new Error("Support API is not reachable.");
+  }
+
+  throw new Error(getErrorMessage(payload as ApiError | null, "Support request failed."));
 }
 
 export default function AppV2() {
@@ -115,6 +145,25 @@ export default function AppV2() {
   useEffect(() => {
     refreshSession();
   }, []);
+
+  const handleUseExistingSession = async () => {
+    setLoading(true);
+    try {
+      const user = await refreshSession();
+      if (!user) {
+        setTone("error");
+        setStatus("No active session found. Sign in first on tellnab.com or here.");
+        return;
+      }
+      setTone("ok");
+      setStatus(`Session found for ${user.name}.`);
+    } catch (error) {
+      setTone("error");
+      setStatus(error instanceof Error ? error.message : "Could not read existing session.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();
@@ -201,7 +250,7 @@ export default function AppV2() {
       sidebar={
         <div className="support-sidebar-stack">
           <h2>Support 2.0</h2>
-          <p>Subdomain API: {API_BASE}</p>
+          <p>Subdomain API: {PRIMARY_API_BASE}</p>
           {authUser ? (
             <p>
               Signed in: {authUser.name} ({authUser.role})
@@ -233,7 +282,7 @@ export default function AppV2() {
           </form>
 
           <div className="support-btn-row">
-            <button onClick={refreshSession} disabled={loading}>
+            <button onClick={handleUseExistingSession} disabled={loading}>
               Use existing session
             </button>
 
