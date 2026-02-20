@@ -124,9 +124,6 @@ function createPermissionPolicy({ prisma }) {
       const acl = await getAcl(req.user.id, req.user.role);
       req.supportAcl = acl;
       if (!acl.hasPermission(permission)) {
-        console.warn(
-          `[Support] Permission denied: user=${req.user.id} role=${req.user.role} required=${permission} actual=[${[...acl.permissions].join(",")}]`
-        );
         return res.status(403).json({ message: "Forbidden" });
       }
       return next();
@@ -139,9 +136,6 @@ function createPermissionPolicy({ prisma }) {
       req.supportAcl = acl;
       const allowed = permissions.some((permission) => acl.hasPermission(permission));
       if (!allowed) {
-        console.warn(
-          `[Support] Any-permission denied: user=${req.user.id} role=${req.user.role} required=[${permissions.join(",")}] actual=[${[...acl.permissions].join(",")}]`
-        );
         return res.status(403).json({ message: "Forbidden" });
       }
       return next();

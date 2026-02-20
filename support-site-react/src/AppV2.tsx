@@ -32,20 +32,39 @@ type AuthUser = {
   role: string;
 };
 
-const SUPPORT_TOKEN_KEY = "tellnab_support_auth_token";
-
 const PRIMARY_API_BASE =
   (window as any).SUPPORT_API_BASE ||
   `${window.location.origin.replace(/\/$/, "")}/api`;
 
+const IS_LOCAL_HOST =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
+
 const API_BASE_CANDIDATES = Array.from(
   new Set([
-    PRIMARY_API_BASE,
-    "/api",
-    "https://tellnab.onrender.com/api",
-    "http://127.0.0.1:4000/api",
+    ...(IS_LOCAL_HOST
+      ? [
+          "http://127.0.0.1:4000/api",
+          "http://localhost:4000/api",
+          PRIMARY_API_BASE,
+          "/api",
+        ]
+      : [
+          PRIMARY_API_BASE,
+          "/api",
+          "https://tellnab.onrender.com/api",
+          "http://127.0.0.1:4000/api",
+        ]),
   ]),
 );
+
+let preferredApiBase: string | null = null;
+
+try {
+  preferredApiBase = window.sessionStorage.getItem("tellnab_support_api_base");
+} catch {
+  preferredApiBase = null;
+}
 
 function getErrorMessage(payload: ApiError | null, fallback: string) {
   if (!payload) return fallback;
@@ -83,32 +102,26 @@ function extractAuthUser(payload: unknown): AuthUser | null {
   return null;
 }
 
-function extractAuthToken(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const root = payload as {
-    token?: unknown;
-    data?: { token?: unknown };
-  };
-
-  if (typeof root.token === "string" && root.token.trim()) return root.token;
-  if (root.data && typeof root.data.token === "string" && root.data.token.trim()) return root.data.token;
-  return null;
-}
-
-async function apiRequest<T>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> {
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | null = null;
   let payload: unknown = null;
   let lastError: unknown = null;
   let lastBase = "";
 
-  for (const base of API_BASE_CANDIDATES) {
+  const candidates = Array.from(
+    new Set([
+      ...(preferredApiBase ? [preferredApiBase] : []),
+      ...API_BASE_CANDIDATES,
+    ]),
+  );
+
+  for (const base of candidates) {
     try {
       lastBase = base;
       response = await fetch(`${base}${path}`, {
         ...init,
         headers: {
           "content-type": "application/json",
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
           ...(init?.headers || {}),
         },
         credentials: "include",
@@ -125,6 +138,12 @@ async function apiRequest<T>(path: string, init?: RequestInit, authToken?: strin
       }
 
       if (response.ok && isJsonResponse) {
+        preferredApiBase = base;
+        try {
+          window.sessionStorage.setItem("tellnab_support_api_base", base);
+        } catch {
+          // ignore storage errors
+        }
         return payload as T;
       }
     } catch (error) {
@@ -146,9 +165,6 @@ async function apiRequest<T>(path: string, init?: RequestInit, authToken?: strin
 
 export default function AppV2() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(
-    () => window.localStorage.getItem(SUPPORT_TOKEN_KEY) || null,
-  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -227,20 +243,11 @@ export default function AppV2() {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), password }),
       });
-
-      const token = extractAuthToken(login);
-      if (token) {
-        setAuthToken(token);
-        window.localStorage.setItem(SUPPORT_TOKEN_KEY, token);
-      }
-
       let user = extractAuthUser(login);
       if (!user) {
         // Some hosts/proxies may return a minimal success payload.
         // Cookie is still set, so confirm via /auth/me before failing.
-        user = await (token
-          ? apiRequest<unknown>("/auth/me", undefined, token).then(extractAuthUser)
-          : refreshSession());
+        user = await refreshSession();
       }
       if (!user) {
         throw new Error(
@@ -270,8 +277,6 @@ export default function AppV2() {
     try {
       const json = await apiRequest<TicketResponse | null>(
         "/tickets?page=1&page_size=50",
-        undefined,
-        authToken,
       );
       const rows = Array.isArray(json?.data) ? json.data : [];
       setTickets(rows);
@@ -293,14 +298,10 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      await apiRequest(
-        `/tickets/${encodeURIComponent(selected.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ status: nextStatus }),
-        },
-        authToken,
-      );
+      await apiRequest(`/tickets/${encodeURIComponent(selected.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
       setTone("ok");
       setStatus(`Ticket updated to ${nextStatus}.`);
       await loadTickets();
@@ -333,18 +334,14 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      await apiRequest<{ data: TicketRow }>(
-        "/tickets",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subject: newSubject.trim(),
-            description: newDescription.trim(),
-            priority: newPriority,
-          }),
-        },
-        authToken,
-      );
+      await apiRequest<{ data: TicketRow }>("/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          subject: newSubject.trim(),
+          description: newDescription.trim(),
+          priority: newPriority,
+        }),
+      });
       setTone("ok");
       setStatus("Ticket created successfully.");
       setNewSubject("");
