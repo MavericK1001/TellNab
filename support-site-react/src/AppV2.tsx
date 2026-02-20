@@ -142,7 +142,11 @@ function extractAuthToken(payload: unknown): string | null {
   };
 
   if (typeof root.token === "string" && root.token.trim()) return root.token;
-  if (root.data && typeof root.data.token === "string" && root.data.token.trim()) {
+  if (
+    root.data &&
+    typeof root.data.token === "string" &&
+    root.data.token.trim()
+  ) {
     return root.data.token;
   }
 
@@ -244,7 +248,11 @@ export default function AppV2() {
 
   const refreshSession = async () => {
     try {
-      const session = await apiRequest<unknown>("/auth/me", undefined, authToken);
+      const session = await apiRequest<unknown>(
+        "/auth/me",
+        undefined,
+        authToken,
+      );
       const user = extractAuthUser(session);
       if (!user) {
         setAuthUser(null);
@@ -298,10 +306,14 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      const login = await apiRequest<unknown>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email: email.trim(), password }),
-      }, authToken);
+      const login = await apiRequest<unknown>(
+        "/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ email: email.trim(), password }),
+        },
+        authToken,
+      );
       const token = extractAuthToken(login);
       if (token) {
         setAuthToken(token);
@@ -311,7 +323,11 @@ export default function AppV2() {
       if (!user) {
         // Some hosts/proxies may return a minimal success payload.
         // Cookie is still set, so confirm via /auth/me before failing.
-        user = await apiRequest<unknown>("/auth/me", undefined, token || authToken).then(extractAuthUser);
+        user = await apiRequest<unknown>(
+          "/auth/me",
+          undefined,
+          token || authToken,
+        ).then(extractAuthUser);
       }
       if (!user) {
         throw new Error(
@@ -364,10 +380,14 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      await apiRequest(`/tickets/${encodeURIComponent(selected.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      }, authToken);
+      await apiRequest(
+        `/tickets/${encodeURIComponent(selected.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus }),
+        },
+        authToken,
+      );
       setTone("ok");
       setStatus(`Ticket updated to ${nextStatus}.`);
       await loadTickets();
@@ -400,14 +420,18 @@ export default function AppV2() {
 
     setLoading(true);
     try {
-      await apiRequest<{ data: TicketRow }>("/tickets", {
-        method: "POST",
-        body: JSON.stringify({
-          subject: newSubject.trim(),
-          description: newDescription.trim(),
-          priority: newPriority,
-        }),
-      }, authToken);
+      await apiRequest<{ data: TicketRow }>(
+        "/tickets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subject: newSubject.trim(),
+            description: newDescription.trim(),
+            priority: newPriority,
+          }),
+        },
+        authToken,
+      );
       setTone("ok");
       setStatus("Ticket created successfully.");
       setNewSubject("");
