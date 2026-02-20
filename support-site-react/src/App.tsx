@@ -755,6 +755,10 @@ export default function App() {
 
           <section className="panel">
             <h2>Your support inbox</h2>
+            <p className="subtle">
+              Open any ticket to launch chat in a side panel. You can reply or
+              close from there.
+            </p>
             <form onSubmit={handleLookup} className="lookup-form">
               <div className="grid two">
                 <label>
@@ -801,7 +805,9 @@ export default function App() {
                     <div className="ticket-top">
                       <p className="ticket-id">Ticket: {ticket.id}</p>
                       <span
-                        className={`status-pill ${String(ticket.status).toLowerCase()}`}
+                        className={`status-pill ${String(
+                          ticket.status,
+                        ).toLowerCase()}`}
                       >
                         {ticket.status}
                       </span>
@@ -824,7 +830,9 @@ export default function App() {
                 <aside className="chat-drawer" role="dialog" aria-modal="true">
                   <div className="chat-drawer-head">
                     <div>
-                      <p className="ticket-meta">Ticket ID: {selectedTicket.id}</p>
+                      <p className="ticket-meta">
+                        Ticket ID: {selectedTicket.id}
+                      </p>
                       <h3>{selectedTicket.subject}</h3>
                     </div>
                     <button
@@ -888,6 +896,10 @@ export default function App() {
       ) : (
         <section className="panel">
           <h2>Support team workspace</h2>
+          <p className="subtle">
+            Pick a ticket from the left, manage status/assignment, and reply in
+            one place.
+          </p>
           {!agentUser ? (
             <form onSubmit={handleAgentLogin}>
               <div className="grid two">

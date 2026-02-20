@@ -1798,22 +1798,71 @@ app.get("/api/admin/support/tickets", authRequired, moderatorOrAdminRequired, as
         : {}),
     };
 
-    const tickets = await prisma.supportTicket.findMany({
+    try {
+      const tickets = await prisma.supportTicket.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }],
+        take: limit,
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+        },
+      });
+
+      return res.json({
+        tickets: tickets.map((ticket) => serializeSupportTicket(ticket)),
+      });
+    } catch (primaryError) {
+      console.error("[support] admin ticket list primary query failed, using fallback", primaryError);
+    }
+
+    const fallbackTickets = await prisma.supportTicket.findMany({
       where,
       orderBy: [{ createdAt: "desc" }],
       take: limit,
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        assignedTo: {
-          select: { id: true, name: true, role: true, email: true },
-        },
+      select: {
+        id: true,
+        type: true,
+        priority: true,
+        status: true,
+        requesterName: true,
+        requesterEmail: true,
+        subject: true,
+        message: true,
+        pageUrl: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     return res.json({
-      tickets: tickets.map((ticket) => serializeSupportTicket(ticket)),
+      tickets: fallbackTickets.map((ticket) => ({
+        id: ticket.id,
+        type: ticket.type,
+        priority: ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL,
+        slaTargetHours: getSupportSlaHours(ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        slaLabel: getSupportSlaLabel(ticket.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        status: ticket.status || SUPPORT_TICKET_STATUS.OPEN,
+        requesterName: ticket.requesterName,
+        requesterEmail: ticket.requesterEmail,
+        subject: ticket.subject,
+        message: ticket.message,
+        pageUrl: ticket.pageUrl,
+        firstResponseDueAt: null,
+        firstResponseAt: null,
+        isSlaBreached: false,
+        internalNote: null,
+        resolutionSummary: null,
+        assignedTo: null,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        resolvedAt: null,
+        resolvedBy: null,
+      })),
     });
   } catch {
     return res.status(500).json({ message: "Failed to fetch support tickets" });
@@ -1837,42 +1886,99 @@ app.patch("/api/admin/support/tickets/:id", authRequired, moderatorOrAdminRequir
       !existing.firstResponseAt &&
       (nextStatus === SUPPORT_TICKET_STATUS.IN_PROGRESS || shouldMarkResolved);
 
-    const updated = await prisma.supportTicket.update({
+    try {
+      const updated = await prisma.supportTicket.update({
+        where: { id: existing.id },
+        data: {
+          ...(data.status ? { status: data.status } : {}),
+          ...(data.priority ? { priority: data.priority } : {}),
+          ...(data.priority && !existing.firstResponseAt
+            ? {
+                firstResponseDueAt: new Date(
+                  new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
+                ),
+              }
+            : {}),
+          ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
+          ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
+          ...(data.resolutionSummary !== undefined
+            ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
+            : {}),
+          ...(data.assignedToId !== undefined
+            ? { assignedToId: normalizeOptionalText(data.assignedToId) }
+            : {}),
+          ...(shouldMarkResolved
+            ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
+            : { resolvedAt: null, resolvedById: null }),
+        },
+        include: {
+          resolvedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          assignedTo: {
+            select: { id: true, name: true, role: true, email: true },
+          },
+        },
+      });
+
+      return res.json({
+        ticket: serializeSupportTicket(updated),
+      });
+    } catch (primaryError) {
+      console.error("[support] admin ticket update primary flow failed, using fallback", primaryError);
+    }
+
+    const fallbackUpdated = await prisma.supportTicket.update({
       where: { id: existing.id },
       data: {
         ...(data.status ? { status: data.status } : {}),
         ...(data.priority ? { priority: data.priority } : {}),
-        ...(data.priority && !existing.firstResponseAt
-          ? {
-              firstResponseDueAt: new Date(
-                new Date(existing.createdAt).getTime() + getSupportSlaHours(nextPriority) * 60 * 60 * 1000,
-              ),
-            }
-          : {}),
-        ...(shouldMarkFirstResponse ? { firstResponseAt: new Date() } : {}),
         ...(data.internalNote !== undefined ? { internalNote: normalizeOptionalText(data.internalNote) } : {}),
         ...(data.resolutionSummary !== undefined
           ? { resolutionSummary: normalizeOptionalText(data.resolutionSummary) }
           : {}),
-        ...(data.assignedToId !== undefined
-          ? { assignedToId: normalizeOptionalText(data.assignedToId) }
-          : {}),
-        ...(shouldMarkResolved
-          ? { resolvedAt: existing.resolvedAt || new Date(), resolvedById: req.user.id }
-          : { resolvedAt: null, resolvedById: null }),
       },
-      include: {
-        resolvedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        assignedTo: {
-          select: { id: true, name: true, role: true, email: true },
-        },
+      select: {
+        id: true,
+        type: true,
+        priority: true,
+        status: true,
+        requesterName: true,
+        requesterEmail: true,
+        subject: true,
+        message: true,
+        pageUrl: true,
+        internalNote: true,
+        resolutionSummary: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     return res.json({
-      ticket: serializeSupportTicket(updated),
+      ticket: {
+        id: fallbackUpdated.id,
+        type: fallbackUpdated.type,
+        priority: fallbackUpdated.priority || SUPPORT_TICKET_PRIORITY.NORMAL,
+        slaTargetHours: getSupportSlaHours(fallbackUpdated.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        slaLabel: getSupportSlaLabel(fallbackUpdated.priority || SUPPORT_TICKET_PRIORITY.NORMAL),
+        status: fallbackUpdated.status || SUPPORT_TICKET_STATUS.OPEN,
+        requesterName: fallbackUpdated.requesterName,
+        requesterEmail: fallbackUpdated.requesterEmail,
+        subject: fallbackUpdated.subject,
+        message: fallbackUpdated.message,
+        pageUrl: fallbackUpdated.pageUrl,
+        firstResponseDueAt: null,
+        firstResponseAt: null,
+        isSlaBreached: false,
+        internalNote: fallbackUpdated.internalNote || null,
+        resolutionSummary: fallbackUpdated.resolutionSummary || null,
+        assignedTo: null,
+        createdAt: fallbackUpdated.createdAt,
+        updatedAt: fallbackUpdated.updatedAt,
+        resolvedAt: null,
+        resolvedBy: null,
+      },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
