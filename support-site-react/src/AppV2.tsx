@@ -69,7 +69,12 @@ const API_BASE_CANDIDATES = Array.from(
           PRIMARY_API_BASE,
           "/api",
         ]
-      : [PRIMARY_API_BASE, "/api", "https://tellnab.onrender.com/api"]),
+      : [
+          ...((window as any).SUPPORT_API_BASE
+            ? [String((window as any).SUPPORT_API_BASE)]
+            : []),
+          "https://tellnab.onrender.com/api",
+        ]),
   ]),
 );
 
@@ -183,7 +188,10 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${networkMessage} (path: ${path})`);
   }
 
-  const fallbackMessage = `Support request failed (${response.status}) via ${lastBase}${path}`;
+  const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+  const fallbackMessage = response.ok && !contentType.includes("application/json")
+    ? `Support request failed: ${lastBase}${path} returned non-JSON content (likely HTML).`
+    : `Support request failed (${response.status}) via ${lastBase}${path}`;
   throw new Error(getErrorMessage(payload as ApiError | null, fallbackMessage));
 }
 
