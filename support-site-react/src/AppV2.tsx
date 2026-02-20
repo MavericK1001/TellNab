@@ -69,18 +69,16 @@ const API_BASE_CANDIDATES = Array.from(
           PRIMARY_API_BASE,
           "/api",
         ]
-      : [
-          PRIMARY_API_BASE,
-          "/api",
-          "https://tellnab.onrender.com/api",
-        ]),
+      : [PRIMARY_API_BASE, "/api", "https://tellnab.onrender.com/api"]),
   ]),
 );
 
 let preferredApiBase: string | null = null;
 
 try {
-  const storedApiBase = window.sessionStorage.getItem("tellnab_support_api_base");
+  const storedApiBase = window.sessionStorage.getItem(
+    "tellnab_support_api_base",
+  );
   preferredApiBase = isAllowedStoredApiBase(storedApiBase)
     ? storedApiBase
     : null;
