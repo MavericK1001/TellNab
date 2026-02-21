@@ -48,10 +48,30 @@ type SocketContextValue = {
 
 const SocketContext = createContext<SocketContextValue | null>(null);
 
-const WS_URL =
-  (window as any).SUPPORT_WS_URL ||
-  (window as any).SUPPORT_AGENT_CHAT_WS_URL ||
-  "";
+function resolveWsUrl() {
+  const explicit =
+    (window as any).SUPPORT_WS_URL ||
+    (window as any).SUPPORT_AGENT_CHAT_WS_URL ||
+    "";
+
+  if (explicit) return String(explicit);
+
+  const apiBase = String((window as any).SUPPORT_API_BASE || "").trim();
+  if (apiBase) {
+    try {
+      const parsed = new URL(apiBase, window.location.origin);
+      const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${parsed.host}/ws`;
+    } catch {
+      // continue to origin fallback
+    }
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws`;
+}
+
+const WS_URL = resolveWsUrl();
 
 export function SocketProvider({ children }: PropsWithChildren) {
   const [connected, setConnected] = useState(false);
@@ -61,6 +81,7 @@ export function SocketProvider({ children }: PropsWithChildren) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const joinedTicketIdsRef = useRef<Set<string>>(new Set());
 
   const ticketListenersRef = useRef<
     Map<string, Set<(message: TicketSocketMessage) => void>>
@@ -68,7 +89,15 @@ export function SocketProvider({ children }: PropsWithChildren) {
   const dmListenersRef = useRef<Set<(message: AgentDm) => void>>(new Set());
 
   const connect = useCallback(() => {
-    if (!WS_URL || !authUser) return;
+    if (!WS_URL || !authUser) {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setConnected(false);
+      setOnlineAgents([]);
+      return;
+    }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const metaToken = (wsRef.current as any).__authToken;
       const metaUserId = (wsRef.current as any).__authUserId;
@@ -95,6 +124,17 @@ export function SocketProvider({ children }: PropsWithChildren) {
           name: authUser.name,
         }),
       );
+
+      ws.send(
+        JSON.stringify({
+          type: "agent_online",
+          userId: authUser.id,
+        }),
+      );
+
+      joinedTicketIdsRef.current.forEach((ticketId) => {
+        ws.send(JSON.stringify({ type: "join_ticket_room", ticketId }));
+      });
     };
 
     ws.onclose = () => {
@@ -179,13 +219,11 @@ export function SocketProvider({ children }: PropsWithChildren) {
   );
 
   const joinTicketRoom = useCallback((ticketId: string) => {
-    if (
-      !ticketId ||
-      !wsRef.current ||
-      wsRef.current.readyState !== WebSocket.OPEN
-    )
-      return;
-    wsRef.current.send(JSON.stringify({ type: "join_ticket_room", ticketId }));
+    const roomId = String(ticketId || "").trim();
+    if (!roomId) return;
+    joinedTicketIdsRef.current.add(roomId);
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: "join_ticket_room", ticketId: roomId }));
   }, []);
 
   const emitTicketMessage = useCallback((message: TicketSocketMessage) => {

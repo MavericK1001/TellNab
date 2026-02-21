@@ -60,7 +60,6 @@ function AppRouter() {
     setAuth,
     joinTicketRoom,
     subscribeTicketMessages,
-    emitTicketMessage,
   } = useSocket();
 
   useEffect(() => {
@@ -119,19 +118,28 @@ function AppRouter() {
   }, []);
 
   useEffect(() => {
-    if (!selectedTicketId) return;
-    joinTicketRoom(selectedTicketId);
-    const unsubscribe = subscribeTicketMessages(selectedTicketId, (msg) => {
-      setMessagesByTicket((prev) => ({
-        ...prev,
-        [selectedTicketId]: [...(prev[selectedTicketId] || []), msg],
-      }));
+    if (!tickets.length) return;
+
+    const unsubscribers = tickets.map((ticket) => {
+      joinTicketRoom(ticket.id);
+      return subscribeTicketMessages(ticket.id, (msg) => {
+        setMessagesByTicket((prev) => {
+          const existing = prev[ticket.id] || [];
+          if (existing.some((m) => m.id === msg.id)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [ticket.id]: [...existing, msg],
+          };
+        });
+      });
     });
 
     return () => {
-      unsubscribe();
+      unsubscribers.forEach((unsub) => unsub());
     };
-  }, [joinTicketRoom, selectedTicketId, subscribeTicketMessages]);
+  }, [joinTicketRoom, subscribeTicketMessages, tickets]);
 
   const selectedMessages = useMemo(
     () => messagesByTicket[selectedTicketId] || [],
@@ -265,18 +273,6 @@ function AppRouter() {
         ),
       }));
 
-      emitTicketMessage({
-        id: msg.id,
-        ticketId,
-        senderId: msg.senderId,
-        senderRole: msg.senderRole,
-        body: msg.body,
-        createdAt: msg.createdAt,
-        fileUrl: attachment?.fileUrl,
-        fileName: attachment?.fileName,
-        fileType: attachment?.fileType,
-        fileSize: attachment?.fileSize,
-      });
       setStatus("Reply sent.");
     } catch (error) {
       setMessagesByTicket((prev) => ({

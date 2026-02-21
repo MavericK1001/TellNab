@@ -5968,7 +5968,7 @@ app.use((err, _req, res, _next) => {
 const httpServer = http.createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
-const activeUsers = new Map(); // userId -> Set<WebSocket>
+const activeUsers = new Map(); // userId -> WebSocket
 const ticketRooms = new Map(); // ticketId -> Set<WebSocket>
 const socketMeta = new WeakMap(); // socket -> { userId, name, role, tickets:Set<string> }
 
@@ -5978,14 +5978,14 @@ function sendSocket(ws, payload) {
 }
 
 function socketsForUser(userId) {
-  return activeUsers.get(String(userId)) || new Set();
+  const socket = activeUsers.get(String(userId));
+  return socket ? [socket] : [];
 }
 
 function broadcastPresence() {
   const agents = [];
-  for (const [userId, sockets] of activeUsers.entries()) {
-    const first = sockets.values().next().value;
-    const meta = first ? socketMeta.get(first) : null;
+  for (const [userId, socket] of activeUsers.entries()) {
+    const meta = socket ? socketMeta.get(socket) : null;
     if (!meta) continue;
     const role = String(meta.role || "").toUpperCase();
     if (![ROLES.SUPPORT_MEMBER, ROLES.MODERATOR, ROLES.ADMIN].includes(role)) continue;
@@ -5993,11 +5993,9 @@ function broadcastPresence() {
   }
 
   const payload = { type: "presence_update", agents };
-  for (const sockets of activeUsers.values()) {
-    for (const socket of sockets) {
-      sendSocket(socket, payload);
-      sendSocket(socket, { type: "presence", agents });
-    }
+  for (const socket of activeUsers.values()) {
+    sendSocket(socket, payload);
+    sendSocket(socket, { type: "presence", agents });
   }
 }
 
@@ -6077,10 +6075,18 @@ wss.on("connection", (ws) => {
         meta.name = user.name;
         meta.role = user.role;
 
-        if (!activeUsers.has(user.id)) {
-          activeUsers.set(user.id, new Set());
+        if (activeUsers.has(user.id)) {
+          const prevSocket = activeUsers.get(user.id);
+          if (prevSocket && prevSocket !== ws) {
+            try {
+              prevSocket.close();
+            } catch {
+              // ignore close error
+            }
+          }
         }
-        activeUsers.get(user.id).add(ws);
+
+        activeUsers.set(user.id, ws);
 
         sendSocket(ws, { type: "agent_online", userId: user.id });
         broadcastPresence();
@@ -6094,6 +6100,12 @@ wss.on("connection", (ws) => {
     const meta = socketMeta.get(ws);
     if (!meta?.userId) {
       sendSocket(ws, { type: "auth_error", message: "Unauthorized" });
+      return;
+    }
+
+    if (type === "agent_online") {
+      sendSocket(ws, { type: "agent_online", userId: meta.userId });
+      broadcastPresence();
       return;
     }
 
@@ -6125,11 +6137,15 @@ wss.on("connection", (ws) => {
     }
 
     if (type === "private_message_sent" || type === "dm") {
+      const to = String(payload.to || "").trim();
+      const body = String(payload.body || "").trim();
+      if (!to || !body) return;
+
       const dm = {
         id: payload.id || `dm-${Date.now()}`,
         from: meta.userId,
-        to: String(payload.to || ""),
-        body: String(payload.body || ""),
+        to,
+        body,
         at: payload.at || new Date().toISOString(),
       };
       emitPrivateMessage(dm.to, dm);
@@ -6148,14 +6164,11 @@ wss.on("connection", (ws) => {
     }
 
     if (meta.userId && activeUsers.has(meta.userId)) {
-      const set = activeUsers.get(meta.userId);
-      set.delete(ws);
-      if (set.size === 0) {
+      const activeSocket = activeUsers.get(meta.userId);
+      if (activeSocket === ws) {
         activeUsers.delete(meta.userId);
-        for (const sockets of activeUsers.values()) {
-          for (const socket of sockets) {
-            sendSocket(socket, { type: "agent_offline", userId: meta.userId });
-          }
+        for (const socket of activeUsers.values()) {
+          sendSocket(socket, { type: "agent_offline", userId: meta.userId });
         }
       }
       broadcastPresence();
