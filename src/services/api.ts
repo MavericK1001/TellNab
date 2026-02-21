@@ -549,16 +549,75 @@ export async function listPublicFeed(options?: {
   sort?: "TRENDING" | "LATEST";
   query?: string;
 }): Promise<PublicFeedResponse> {
-  const response = await api.get<PublicFeedResponse>("/public/feed", {
-    params: {
-      ...(options?.cursor ? { cursor: options.cursor } : {}),
-      ...(options?.limit ? { limit: options.limit } : {}),
+  try {
+    const response = await api.get<PublicFeedResponse>("/public/feed", {
+      params: {
+        ...(options?.cursor ? { cursor: options.cursor } : {}),
+        ...(options?.limit ? { limit: options.limit } : {}),
+        ...(options?.categoryId ? { categoryId: options.categoryId } : {}),
+        ...(options?.sort ? { sort: options.sort } : {}),
+        ...(options?.query ? { q: options.query } : {}),
+      },
+    });
+    return response.data;
+  } catch (error) {
+    if (!axios.isAxiosError(error)) {
+      throw error;
+    }
+
+    const status = error.response?.status;
+    const code = (error.response?.data as { code?: string } | undefined)?.code;
+    const canFallback =
+      status === 404 ||
+      status === 501 ||
+      code === "FEATURE_DISABLED" ||
+      (status === 400 && code === "UNKNOWN_ROUTE");
+
+    if (!canFallback) {
+      throw error;
+    }
+
+    const fallbackItems = await listAdvice("APPROVED", {
       ...(options?.categoryId ? { categoryId: options.categoryId } : {}),
-      ...(options?.sort ? { sort: options.sort } : {}),
-      ...(options?.query ? { q: options.query } : {}),
-    },
-  });
-  return response.data;
+    });
+
+    const query = String(options?.query || "")
+      .trim()
+      .toLowerCase();
+    const filtered = query
+      ? fallbackItems.filter((item) => {
+          const haystack = `${item.title} ${item.body} ${item.author?.name || ""}`.toLowerCase();
+          return haystack.includes(query);
+        })
+      : fallbackItems;
+
+    const sort = options?.sort || "TRENDING";
+    const sorted = [...filtered].sort((a, b) => {
+      if (sort === "LATEST") {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+
+      const aScore = Number(a.trendingScore || 0) + Number(a.helpfulCount || 0) * 3 + Number(a.viewCount || 0);
+      const bScore = Number(b.trendingScore || 0) + Number(b.helpfulCount || 0) * 3 + Number(b.viewCount || 0);
+      if (bScore !== aScore) return bScore - aScore;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    const limit = options?.limit || 12;
+    const startIndex = options?.cursor ? Math.max(0, sorted.findIndex((item) => item.id === options.cursor) + 1) : 0;
+    const items = sorted.slice(startIndex, startIndex + limit);
+    const nextItem = sorted[startIndex + limit] || null;
+
+    return {
+      items,
+      pageInfo: {
+        nextCursor: nextItem?.id || null,
+        hasMore: Boolean(nextItem),
+        limit,
+        sort,
+      },
+    };
+  }
 }
 
 export async function listCategories(): Promise<CategoryItem[]> {
