@@ -35,8 +35,14 @@ model User {
   conversationLinks    ConversationParticipant[]
   sentMessages         Message[]
   adviceFollows        AdviceFollow[]
+  adviceReactions      AdviceReaction[]
+  savedAdvices         SavedAdvice[]
   notifications        Notification[]
   boostOrders          AdviceBoostOrder[]
+  priorityOrders       AdvicePriorityOrder[]
+  advisorProfile       AdvisorProfile?
+  advisorFollowers     AdvisorFollow[] @relation("AdvisorFollowedAdvisor")
+  followedAdvisors     AdvisorFollow[] @relation("AdvisorFollower")
   walletTransactions   WalletTransaction[]
   walletActions        WalletTransaction[] @relation("WalletTransactionActor")
   badges               UserBadge[]
@@ -316,10 +322,17 @@ model Advice {
   title       String
   body        String
   status      String   @default("PENDING")
+  visibility  String   @default("PUBLIC")
   isLocked    Boolean  @default(false)
   isFeatured  Boolean  @default(false)
   isSpam      Boolean  @default(false)
+  isCrisisFlagged Boolean @default(false)
+  crisisKeywords String?
   isBoostActive Boolean @default(false)
+  helpfulCount Int      @default(0)
+  viewCount    Int      @default(0)
+  priorityTier String   @default("NORMAL")
+  priorityScore Int     @default(0)
   boostActivatedAt DateTime?
   boostExpiresAt DateTime?
   holdReason  String?
@@ -341,8 +354,15 @@ model Advice {
   comments AdviceComment[]
   actions  AdviceModerationAction[]
   follows  AdviceFollow[]
+  reactions AdviceReaction[]
+  saves     SavedAdvice[]
   notifications Notification[]
   boostOrders AdviceBoostOrder[]
+  priorityOrders AdvicePriorityOrder[]
+
+  @@index([status, visibility, createdAt])
+  @@index([status, categoryId, createdAt])
+  @@index([priorityTier, createdAt])
 }
 
 model DiscussionGroup {
@@ -452,9 +472,99 @@ model AdviceFollow {
   @@unique([adviceId, userId])
 }
 
+model AdviceReaction {
+  id        String   @id @default(cuid())
+  type      String   @default("HELPFUL")
+  createdAt DateTime @default(now())
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([adviceId, userId, type])
+  @@index([adviceId, type])
+}
+
+model SavedAdvice {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([adviceId, userId])
+  @@index([userId, createdAt])
+}
+
+model AdvisorProfile {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  displayName      String
+  avatarUrl        String?
+  bio              String?
+  specialties      String   @default("[]")
+  isVerified       Boolean  @default(false)
+  responseTimeMins Int      @default(1440)
+  totalReplies     Int      @default(0)
+  ratingAvg        Float    @default(0)
+  ratingCount      Int      @default(0)
+  followersCount   Int      @default(0)
+  isPublic         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AdvisorFollow {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  followerId String
+  follower   User @relation("AdvisorFollower", fields: [followerId], references: [id], onDelete: Cascade)
+
+  advisorId String
+  advisor   User @relation("AdvisorFollowedAdvisor", fields: [advisorId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, advisorId])
+  @@index([advisorId, createdAt])
+}
+
+model AdvicePriorityOrder {
+  id          String   @id @default(cuid())
+  amountCents Int
+  currency    String   @default("USD")
+  status      String   @default("PENDING")
+  provider    String   @default("PENDING_GATEWAY")
+  providerRef String?
+  queueTier   String   @default("PRIORITY")
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([adviceId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
 model AdviceComment {
   id        String   @id @default(cuid())
   body      String
+  messageType String @default("TEXT")
+  audioUrl   String?
+  audioDurationSec Int?
+  transcript String?
   createdAt DateTime @default(now())
 
   adviceId String
