@@ -2,18 +2,22 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
-import { listAdvice, listCategories } from "../services/api";
+import { listCategories, listPublicFeed, reactHelpful } from "../services/api";
 import { AdviceItem, CategoryItem } from "../types";
 import { useSeo } from "../utils/seo";
 
 export default function Feed() {
   const [posts, setPosts] = useState<AdviceItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [featuredOnly, setFeaturedOnly] = useState(false);
+  const [sort, setSort] = useState<"TRENDING" | "LATEST">("TRENDING");
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [reactionBusyId, setReactionBusyId] = useState<string | null>(null);
 
   useSeo({
     title: "Advice Feed - Trending Anonymous Threads | TellNab",
@@ -22,32 +26,76 @@ export default function Feed() {
     path: "/feed",
   });
 
+  async function loadPage(isReset: boolean) {
+    if (isReset) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setLoadingMore(true);
+    }
+
+    try {
+      const response = await listPublicFeed({
+        cursor: isReset ? undefined : nextCursor || undefined,
+        limit: 12,
+        categoryId: selectedCategoryId || undefined,
+        sort,
+        query: query.trim() || undefined,
+      });
+
+      setPosts((prev) => {
+        const merged = isReset ? response.items : [...prev, ...response.items];
+        const deduped = new Map<string, AdviceItem>();
+        merged.forEach((item) => deduped.set(item.id, item));
+        return Array.from(deduped.values());
+      });
+      setNextCursor(response.pageInfo.nextCursor);
+      setHasMore(response.pageInfo.hasMore);
+    } catch {
+      setError("Unable to load feed. Please try again.");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }
+
   useEffect(() => {
-    listAdvice("APPROVED")
-      .then(setPosts)
-      .catch(() => setError("Unable to load feed. Please try again."))
-      .finally(() => setLoading(false));
+    void loadPage(true);
 
     listCategories()
       .then(setCategories)
       .catch(() => setCategories([]));
-  }, []);
+  }, [selectedCategoryId, sort]);
 
-  const filtered = useMemo(() => {
-    return posts.filter((post) => {
-      if (featuredOnly && !post.isFeatured) return false;
-      if (selectedCategoryId && post.category?.id !== selectedCategoryId)
-        return false;
-      if (!query.trim()) return true;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadPage(true);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
-      const q = query.toLowerCase();
-      return (
-        post.title.toLowerCase().includes(q) ||
-        post.body.toLowerCase().includes(q) ||
-        (post.author?.name || "").toLowerCase().includes(q)
+  const filtered = useMemo(() => posts, [posts]);
+
+  async function onHelpful(post: AdviceItem) {
+    try {
+      setReactionBusyId(post.id);
+      const result = await reactHelpful(post.id, "toggle");
+      setPosts((prev) =>
+        prev.map((item) =>
+          item.id === post.id
+            ? {
+                ...item,
+                helpfulCount: result.helpfulCount,
+              }
+            : item,
+        ),
       );
-    });
-  }, [featuredOnly, posts, query, selectedCategoryId]);
+    } catch {
+      // soft fail
+    } finally {
+      setReactionBusyId(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -66,14 +114,16 @@ export default function Feed() {
             placeholder="Search threads by title, content, or author"
             className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100"
           />
-          <label className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200">
-            <input
-              type="checkbox"
-              checked={featuredOnly}
-              onChange={(event) => setFeaturedOnly(event.target.checked)}
-            />
-            Featured only
-          </label>
+          <select
+            value={sort}
+            onChange={(event) =>
+              setSort(event.target.value as "TRENDING" | "LATEST")
+            }
+            className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-200"
+          >
+            <option value="TRENDING">Trending</option>
+            <option value="LATEST">Latest</option>
+          </select>
           <select
             value={selectedCategoryId}
             onChange={(event) => setSelectedCategoryId(event.target.value)}
@@ -130,6 +180,12 @@ export default function Feed() {
                         Boosted
                       </span>
                     ) : null}
+                    {post.priorityTier === "PRIORITY" ||
+                    post.priorityTier === "URGENT" ? (
+                      <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-200">
+                        {post.priorityTier}
+                      </span>
+                    ) : null}
                     {post.isLocked ? (
                       <span className="rounded-full border border-rose-300/20 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-200">
                         Locked
@@ -149,15 +205,33 @@ export default function Feed() {
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-slate-400">
-                    by {post.author?.name || "Unknown"}
-                  </p>
-                  <Link
-                    to={`/advice/${post.id}`}
-                    className="inline-flex items-center justify-center rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
-                  >
-                    Open thread
-                  </Link>
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <span>by {post.author?.name || "Unknown"}</span>
+                    {post.author?.advisorProfile?.isVerified ? (
+                      <Link
+                        to={`/advisors/${post.author.id}`}
+                        className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-500/20"
+                      >
+                        Verified advisor
+                      </Link>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={reactionBusyId === post.id}
+                      onClick={() => void onHelpful(post)}
+                      className="inline-flex items-center justify-center rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-60"
+                    >
+                      Helpful {post.helpfulCount || 0}
+                    </button>
+                    <Link
+                      to={`/advice/${post.id}`}
+                      className="inline-flex items-center justify-center rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
+                    >
+                      Open thread
+                    </Link>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -169,6 +243,19 @@ export default function Feed() {
                 </p>
               </Card>
             ) : null}
+
+            {hasMore ? (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => void loadPage(false)}
+                  disabled={loadingMore}
+                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60"
+                >
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <Card className="h-fit border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65">
@@ -177,12 +264,20 @@ export default function Feed() {
             </h3>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
               <p>• Source: approved advice threads</p>
-              <p>• Sorted: boosted first, featured next, latest after</p>
-              <p>• Access: public feed, open thread details</p>
+              <p>• Sorted: trending score or latest</p>
+              <p>• Access: public-only visibility</p>
+              <p>• Pagination: cursor based</p>
             </div>
           </Card>
         </div>
       )}
+
+      <Link
+        to="/ask"
+        className="fixed bottom-5 right-5 z-20 inline-flex items-center justify-center rounded-full bg-violet-500 px-5 py-3 text-sm font-semibold text-white shadow-xl shadow-violet-900/50 md:hidden"
+      >
+        Ask anonymously
+      </Link>
     </div>
   );
 }

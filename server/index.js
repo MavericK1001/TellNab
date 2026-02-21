@@ -42,8 +42,27 @@ const NOTIFICATION_TYPES = {
   REPLY: "REPLY",
   NEW_COMMENT: "NEW_COMMENT",
   MODERATION: "MODERATION",
+  REACTION: "REACTION",
+  ADVISOR_ACTIVITY: "ADVISOR_ACTIVITY",
+  CRISIS_ALERT: "CRISIS_ALERT",
   GROUP_JOIN_REQUEST: "GROUP_JOIN_REQUEST",
   GROUP_JOIN_APPROVED: "GROUP_JOIN_APPROVED",
+};
+
+const ADVICE_VISIBILITY = {
+  PUBLIC: "PUBLIC",
+  PRIVATE: "PRIVATE",
+};
+
+const ADVICE_PRIORITY_TIER = {
+  NORMAL: "NORMAL",
+  PRIORITY: "PRIORITY",
+  URGENT: "URGENT",
+};
+
+const ADVICE_COMMENT_TYPE = {
+  TEXT: "TEXT",
+  VOICE: "VOICE",
 };
 
 const GROUP_VISIBILITY = {
@@ -133,6 +152,16 @@ const SUPPORT_EMAIL_WEBHOOK_URL = process.env.SUPPORT_EMAIL_WEBHOOK_URL || "";
 const SUPPORT_SUBDOMAIN = String(process.env.SUPPORT_SUBDOMAIN || "support.tellnab.com").toLowerCase();
 const ENABLE_LEGACY_SUPPORT = String(process.env.ENABLE_LEGACY_SUPPORT || "false").toLowerCase() === "true";
 const AUTH_COOKIE_DOMAIN = String(process.env.AUTH_COOKIE_DOMAIN || "").trim();
+const FEATURE_PUBLIC_FEED_V2 = String(process.env.FEATURE_PUBLIC_FEED_V2 || "true").toLowerCase() === "true";
+const FEATURE_ADVISOR_PROFILES =
+  String(process.env.FEATURE_ADVISOR_PROFILES || "true").toLowerCase() === "true";
+const FEATURE_PRIORITY_ADVICE =
+  String(process.env.FEATURE_PRIORITY_ADVICE || "true").toLowerCase() === "true";
+const FEATURE_REALTIME_NOTIFICATIONS =
+  String(process.env.FEATURE_REALTIME_NOTIFICATIONS || "true").toLowerCase() === "true";
+const FEATURE_VOICE_REPLIES = String(process.env.FEATURE_VOICE_REPLIES || "true").toLowerCase() === "true";
+const FEATURE_CRISIS_DETECTION =
+  String(process.env.FEATURE_CRISIS_DETECTION || "true").toLowerCase() === "true";
 
 const WALLET_BALANCE_TYPES = {
   PAID: "PAID",
@@ -373,6 +402,7 @@ function supportStaffRequired(req, res, next) {
 const realtimeHub = {
   emitTicketMessage: (_ticketId, _message) => {},
   emitPrivateMessage: (_targetUserId, _message) => {},
+  emitUserEvent: (_targetUserId, _eventType, _payload) => {},
   notifyPresence: () => {},
 };
 
@@ -418,10 +448,17 @@ function sanitizeAdvice(advice) {
     title: advice.title,
     body: advice.body,
     status: advice.status,
+    visibility: advice.visibility || ADVICE_VISIBILITY.PUBLIC,
     isLocked: advice.isLocked,
     isFeatured: advice.isFeatured,
     isSpam: advice.isSpam,
+    isCrisisFlagged: Boolean(advice.isCrisisFlagged),
+    crisisKeywords: advice.crisisKeywords || null,
     isBoostActive: advice.isBoostActive,
+    helpfulCount: Number(advice.helpfulCount || 0),
+    viewCount: Number(advice.viewCount || 0),
+    priorityTier: advice.priorityTier || ADVICE_PRIORITY_TIER.NORMAL,
+    priorityScore: Number(advice.priorityScore || 0),
     boostExpiresAt: advice.boostExpiresAt || null,
     holdReason: advice.holdReason,
     followCount: Number(advice.followCount || 0),
@@ -448,6 +485,14 @@ function sanitizeAdvice(advice) {
           id: advice.author.id,
           name: advice.author.name,
           role: advice.author.role,
+          advisorProfile: advice.author.advisorProfile
+            ? {
+                displayName: advice.author.advisorProfile.displayName,
+                isVerified: Boolean(advice.author.advisorProfile.isVerified),
+                ratingAvg: Number(advice.author.advisorProfile.ratingAvg || 0),
+                totalReplies: Number(advice.author.advisorProfile.totalReplies || 0),
+              }
+            : null,
         }
       : undefined,
   };
@@ -771,10 +816,106 @@ async function evaluateAutoBadges(userId) {
 
 async function createNotification(data) {
   try {
-    await prisma.notification.create({ data });
+    const created = await prisma.notification.create({ data });
+    if (FEATURE_REALTIME_NOTIFICATIONS && created?.userId) {
+      realtimeHub.emitUserEvent(created.userId, "notification_received", {
+        notification: sanitizeNotification(created),
+      });
+    }
+    return created;
   } catch {
     // notifications should not break primary user action
+    return null;
   }
+}
+
+function sanitizeAdvisorProfile(profile, options = {}) {
+  if (!profile) return null;
+  const specialties = (() => {
+    try {
+      return JSON.parse(profile.specialties || "[]");
+    } catch {
+      return [];
+    }
+  })();
+
+  return {
+    id: profile.id,
+    userId: profile.userId,
+    displayName: profile.displayName,
+    avatarUrl: profile.avatarUrl || null,
+    bio: profile.bio || null,
+    specialties: Array.isArray(specialties) ? specialties : [],
+    isVerified: Boolean(profile.isVerified),
+    rating: Number(profile.ratingAvg || 0),
+    ratingCount: Number(profile.ratingCount || 0),
+    totalReplies: Number(profile.totalReplies || 0),
+    responseTimeMins: Number(profile.responseTimeMins || 0),
+    followersCount: Number(profile.followersCount || 0),
+    isFollowing: Boolean(options.isFollowing),
+    user: profile.user
+      ? {
+          id: profile.user.id,
+          name: profile.user.name,
+          role: profile.user.role,
+        }
+      : null,
+  };
+}
+
+const CRISIS_KEYWORDS = [
+  "suicide",
+  "kill myself",
+  "end my life",
+  "self harm",
+  "self-harm",
+  "want to die",
+  "hurt myself",
+  "overdose",
+  "can't go on",
+  "ending it all",
+];
+
+function detectCrisisKeywords(text) {
+  const normalized = String(text || "").toLowerCase();
+  if (!normalized) return [];
+  return CRISIS_KEYWORDS.filter((keyword) => normalized.includes(keyword));
+}
+
+function buildTrendingScore(advice) {
+  const createdAt = new Date(advice.createdAt || Date.now()).getTime();
+  const ageHours = Math.max(1, (Date.now() - createdAt) / (1000 * 60 * 60));
+  const helpful = Number(advice.helpfulCount || 0);
+  const views = Number(advice.viewCount || 0);
+  const followCount = Number(advice.followCount || 0);
+  const priority = advice.priorityTier === ADVICE_PRIORITY_TIER.URGENT
+    ? 100
+    : advice.priorityTier === ADVICE_PRIORITY_TIER.PRIORITY
+      ? 30
+      : 0;
+  return Math.round((helpful * 6 + followCount * 4 + views * 0.2 + priority) / Math.pow(ageHours, 0.8));
+}
+
+async function notifyCrisisModerationQueue({ adviceId, actorName, source }) {
+  const moderators = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      role: { in: [ROLES.MODERATOR, ROLES.ADMIN] },
+    },
+    select: { id: true },
+  });
+
+  await Promise.all(
+    moderators.map((moderator) =>
+      createNotification({
+        userId: moderator.id,
+        type: NOTIFICATION_TYPES.CRISIS_ALERT,
+        title: "Urgent safety review required",
+        body: `${actorName} submitted ${source} flagged for crisis review.`,
+        adviceId,
+      }),
+    ),
+  );
 }
 
 async function resolveDefaultCategoryId() {
@@ -1509,6 +1650,7 @@ const createAdviceSchema = z.object({
   body: z.string().min(10).max(5000),
   categoryId: z.string().min(1).optional(),
   groupId: z.string().min(1).optional(),
+  visibility: z.enum([ADVICE_VISIBILITY.PUBLIC, ADVICE_VISIBILITY.PRIVATE]).optional(),
 });
 
 const createDiscussionGroupSchema = z.object({
@@ -1540,10 +1682,25 @@ const adviceFlagsSchema = z
     message: "At least one flag is required",
   });
 
-const commentSchema = z.object({
-  body: z.string().min(1).max(1000),
-  parentId: z.string().optional(),
-});
+const commentSchema = z
+  .object({
+    body: z.string().max(1000).optional(),
+    parentId: z.string().optional(),
+    messageType: z.enum([ADVICE_COMMENT_TYPE.TEXT, ADVICE_COMMENT_TYPE.VOICE]).optional(),
+    audioUrl: z.string().url().max(5000).optional(),
+    audioDurationSec: z.number().int().min(1).max(3600).optional(),
+    transcript: z.string().max(2000).optional(),
+  })
+  .refine(
+    (value) => {
+      const type = value.messageType || ADVICE_COMMENT_TYPE.TEXT;
+      if (type === ADVICE_COMMENT_TYPE.VOICE) {
+        return Boolean(value.audioUrl);
+      }
+      return Boolean(String(value.body || "").trim().length);
+    },
+    { message: "Text body is required for text comments and audioUrl is required for voice comments" },
+  );
 
 const moderateCommentDeleteSchema = z.object({
   reason: z.string().min(3).max(240).optional(),
@@ -1566,6 +1723,30 @@ const notificationReadSchema = z.object({
 });
 
 const createBoostCheckoutSchema = z.object({});
+
+const createPriorityCheckoutSchema = z.object({
+  provider: z.string().min(2).max(32).optional(),
+});
+
+const publicFeedQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(40).default(12),
+  categoryId: z.string().min(1).optional(),
+  sort: z.enum(["TRENDING", "LATEST"]).default("TRENDING"),
+  q: z.string().max(120).optional().default(""),
+});
+
+const helpfulReactionSchema = z.object({
+  action: z.enum(["add", "remove", "toggle"]).default("toggle"),
+});
+
+const advisorListQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(30).default(12),
+  q: z.string().max(120).optional().default(""),
+  specialty: z.string().max(80).optional(),
+  verifiedOnly: z.coerce.boolean().optional().default(false),
+});
 
 const aiAdviceAssistSchema = z.object({
   title: z.string().max(140).optional().default(""),
@@ -4523,6 +4704,10 @@ app.post("/api/advice", authRequired, async (req, res) => {
   try {
     const data = createAdviceSchema.parse(req.body);
     const autoSpamFlag = isLikelySpamTitle(data.title);
+    const crisisMatches = FEATURE_CRISIS_DETECTION
+      ? detectCrisisKeywords(`${data.title}\n${data.body}`)
+      : [];
+    const isCrisisFlagged = crisisMatches.length > 0;
 
     let resolvedCategoryId = data.categoryId || null;
     if (resolvedCategoryId) {
@@ -4565,18 +4750,34 @@ app.post("/api/advice", authRequired, async (req, res) => {
         body: data.body,
         status: ADVICE_STATUS.PENDING,
         isSpam: autoSpamFlag,
+        visibility: data.visibility || ADVICE_VISIBILITY.PUBLIC,
+        isCrisisFlagged,
+        crisisKeywords: isCrisisFlagged ? JSON.stringify(crisisMatches) : null,
+        priorityTier: isCrisisFlagged ? ADVICE_PRIORITY_TIER.URGENT : ADVICE_PRIORITY_TIER.NORMAL,
+        priorityScore: isCrisisFlagged ? 1000 : 0,
+        holdReason: isCrisisFlagged ? "CRISIS_REVIEW_REQUIRED" : null,
         authorId: req.user.id,
         categoryId: resolvedCategoryId,
         groupId: resolvedGroupId,
       },
       include: {
-        author: true,
+        author: {
+          include: { advisorProfile: true },
+        },
         category: true,
         group: true,
       },
     });
 
     await evaluateAutoBadges(req.user.id);
+
+    if (isCrisisFlagged) {
+      await notifyCrisisModerationQueue({
+        adviceId: advice.id,
+        actorName: req.user.name,
+        source: "an advice thread",
+      });
+    }
 
     return res.status(201).json({ advice: sanitizeAdvice(advice) });
   } catch (error) {
@@ -4606,6 +4807,7 @@ app.get("/api/advice", async (req, res) => {
 
   let where = {
     status: ADVICE_STATUS.APPROVED,
+    visibility: ADVICE_VISIBILITY.PUBLIC,
     ...(categoryId ? { categoryId } : {}),
     ...(groupId ? { groupId } : {}),
   };
@@ -4620,7 +4822,7 @@ app.get("/api/advice", async (req, res) => {
   const list = await prisma.advice.findMany({
     where,
     orderBy: [{ isBoostActive: "desc" }, { isFeatured: "desc" }, { createdAt: "desc" }],
-    include: { author: true, category: true, group: true },
+    include: { author: { include: { advisorProfile: true } }, category: true, group: true },
   });
 
   return res.json({ advices: list.map(sanitizeAdvice) });
@@ -4632,7 +4834,7 @@ app.get("/api/advice/mine", authRequired, async (req, res) => {
   const list = await prisma.advice.findMany({
     where: { authorId: req.user.id },
     orderBy: [{ isBoostActive: "desc" }, { createdAt: "desc" }],
-    include: { author: true, category: true, group: true },
+    include: { author: { include: { advisorProfile: true } }, category: true, group: true },
   });
   return res.json({ advices: list.map(sanitizeAdvice) });
 });
@@ -4655,11 +4857,475 @@ app.get("/api/advice/following", authRequired, async (req, res) => {
       follows: { some: { userId: req.user.id } },
     },
     orderBy: [{ isBoostActive: "desc" }, { isFeatured: "desc" }, { createdAt: "desc" }],
-    include: { author: true, category: true, group: true },
+    include: { author: { include: { advisorProfile: true } }, category: true, group: true },
   });
 
   const withFollow = list.map((advice) => ({ ...advice, isFollowing: true }));
   return res.json({ advices: withFollow.map(sanitizeAdvice) });
+});
+
+app.get("/api/public/feed", async (req, res) => {
+  if (!FEATURE_PUBLIC_FEED_V2) {
+    return sendError(res, {
+      status: 404,
+      code: "FEATURE_DISABLED",
+      message: "Public feed v2 is disabled",
+    });
+  }
+
+  await clearExpiredBoosts();
+
+  const parsed = publicFeedQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) {
+    return sendError(res, {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "Invalid feed query",
+      details: parsed.error.issues,
+    });
+  }
+
+  const { cursor, limit, categoryId, sort, q } = parsed.data;
+  const where = {
+    status: ADVICE_STATUS.APPROVED,
+    visibility: ADVICE_VISIBILITY.PUBLIC,
+    ...(categoryId ? { categoryId } : {}),
+    ...(q
+      ? {
+          OR: [
+            { title: { contains: q } },
+            { body: { contains: q } },
+            { author: { name: { contains: q } } },
+          ],
+        }
+      : {}),
+  };
+
+  const orderBy =
+    sort === "LATEST"
+      ? [{ createdAt: "desc" }]
+      : [
+          { priorityScore: "desc" },
+          { helpfulCount: "desc" },
+          { viewCount: "desc" },
+          { isBoostActive: "desc" },
+          { createdAt: "desc" },
+        ];
+
+  const items = await prisma.advice.findMany({
+    where,
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    orderBy,
+    include: {
+      author: { include: { advisorProfile: true } },
+      category: true,
+      group: true,
+      follows: { select: { id: true } },
+    },
+  });
+
+  const hasMore = items.length > limit;
+  const sliced = hasMore ? items.slice(0, -1) : items;
+  const advices = sliced
+    .map((item) => ({
+      ...sanitizeAdvice({ ...item, followCount: item.follows?.length || 0 }),
+      trendingScore: buildTrendingScore(item),
+    }))
+    .sort((a, b) => (sort === "LATEST" ? 0 : b.trendingScore - a.trendingScore));
+
+  return res.json({
+    items: advices,
+    pageInfo: {
+      nextCursor: hasMore ? sliced[sliced.length - 1]?.id || null : null,
+      hasMore,
+      limit,
+      sort,
+    },
+  });
+});
+
+app.post("/api/advice/:id/reactions/helpful", authRequired, async (req, res) => {
+  const parsed = helpfulReactionSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return sendError(res, {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "Invalid reaction input",
+      details: parsed.error.issues,
+    });
+  }
+
+  const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
+  if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
+  }
+
+  const existing = await prisma.adviceReaction.findUnique({
+    where: {
+      adviceId_userId_type: {
+        adviceId: advice.id,
+        userId: req.user.id,
+        type: "HELPFUL",
+      },
+    },
+  });
+
+  const action = parsed.data.action;
+  const shouldAdd = action === "add" || (action === "toggle" && !existing);
+  const shouldRemove = action === "remove" || (action === "toggle" && Boolean(existing));
+
+  if (shouldAdd && !existing) {
+    await prisma.adviceReaction.create({
+      data: {
+        adviceId: advice.id,
+        userId: req.user.id,
+        type: "HELPFUL",
+      },
+    });
+  }
+
+  if (shouldRemove && existing) {
+    await prisma.adviceReaction.delete({ where: { id: existing.id } });
+  }
+
+  const helpfulCount = await prisma.adviceReaction.count({
+    where: { adviceId: advice.id, type: "HELPFUL" },
+  });
+
+  await prisma.advice.update({
+    where: { id: advice.id },
+    data: { helpfulCount },
+  });
+
+  const reacted = shouldAdd && !existing;
+  if (reacted && advice.authorId !== req.user.id) {
+    await createNotification({
+      userId: advice.authorId,
+      type: NOTIFICATION_TYPES.REACTION,
+      title: "Your thread received a helpful reaction",
+      body: `${req.user.name} found your thread helpful.`,
+      adviceId: advice.id,
+    });
+  }
+
+  return res.json({
+    adviceId: advice.id,
+    helpfulCount,
+    reacted,
+  });
+});
+
+app.post("/api/advice/:id/views", async (req, res) => {
+  const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
+  if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
+  }
+
+  const updated = await prisma.advice.update({
+    where: { id: advice.id },
+    data: { viewCount: { increment: 1 } },
+    select: { id: true, viewCount: true },
+  });
+
+  return res.json({ adviceId: updated.id, viewCount: updated.viewCount });
+});
+
+app.post("/api/advice/:id/priority/checkout", authRequired, async (req, res) => {
+  if (!FEATURE_PRIORITY_ADVICE) {
+    return sendError(res, {
+      status: 404,
+      code: "FEATURE_DISABLED",
+      message: "Priority advice is disabled",
+    });
+  }
+
+  const parsed = createPriorityCheckoutSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return sendError(res, {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "Invalid priority checkout input",
+      details: parsed.error.issues,
+    });
+  }
+
+  const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
+  if (!advice || advice.authorId !== req.user.id) {
+    return sendError(res, {
+      status: 403,
+      code: "PRIORITY_FORBIDDEN",
+      message: "Only the advice owner can request priority",
+    });
+  }
+
+  const amountCents = Math.max(100, Math.round(getBoostPriceCents() * 0.75));
+  const provider = String(parsed.data.provider || "PENDING_GATEWAY").toUpperCase();
+
+  const result = await prisma.$transaction(async (tx) => {
+    const order = await tx.advicePriorityOrder.create({
+      data: {
+        adviceId: advice.id,
+        userId: req.user.id,
+        amountCents,
+        currency: "USD",
+        status: "REQUIRES_PAYMENT",
+        provider,
+        providerRef: `priority_${Date.now()}`,
+        queueTier: ADVICE_PRIORITY_TIER.PRIORITY,
+      },
+    });
+
+    const updatedAdvice = await tx.advice.update({
+      where: { id: advice.id },
+      data: {
+        priorityTier: ADVICE_PRIORITY_TIER.PRIORITY,
+        priorityScore: 500,
+      },
+      include: {
+        author: { include: { advisorProfile: true } },
+        category: true,
+        group: true,
+      },
+    });
+
+    return { order, advice: updatedAdvice };
+  });
+
+  return res.status(201).json({
+    order: result.order,
+    advice: sanitizeAdvice(result.advice),
+    checkout: {
+      provider,
+      state: "payment_required",
+    },
+  });
+});
+
+app.get("/api/advisors", async (req, res) => {
+  if (!FEATURE_ADVISOR_PROFILES) {
+    return res.json({ items: [], pageInfo: { nextCursor: null, hasMore: false } });
+  }
+
+  const parsed = advisorListQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) {
+    return sendError(res, {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "Invalid advisor query",
+      details: parsed.error.issues,
+    });
+  }
+
+  const viewer = await getOptionalAuthUser(req);
+  const { cursor, limit, q, specialty, verifiedOnly } = parsed.data;
+
+  const rows = await prisma.advisorProfile.findMany({
+    where: {
+      isPublic: true,
+      ...(verifiedOnly ? { isVerified: true } : {}),
+      ...(specialty ? { specialties: { contains: specialty } } : {}),
+      ...(q
+        ? {
+            OR: [
+              { displayName: { contains: q } },
+              { bio: { contains: q } },
+              { user: { name: { contains: q } } },
+            ],
+          }
+        : {}),
+    },
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    orderBy: [{ isVerified: "desc" }, { ratingAvg: "desc" }, { followersCount: "desc" }],
+    include: {
+      user: { select: { id: true, name: true, role: true } },
+    },
+  });
+
+  const hasMore = rows.length > limit;
+  const sliced = hasMore ? rows.slice(0, -1) : rows;
+
+  let followingSet = new Set();
+  if (viewer) {
+    const links = await prisma.advisorFollow.findMany({
+      where: {
+        followerId: viewer.id,
+        advisorId: { in: sliced.map((item) => item.userId) },
+      },
+      select: { advisorId: true },
+    });
+    followingSet = new Set(links.map((link) => link.advisorId));
+  }
+
+  return res.json({
+    items: sliced.map((item) =>
+      sanitizeAdvisorProfile(item, { isFollowing: followingSet.has(item.userId) }),
+    ),
+    pageInfo: {
+      nextCursor: hasMore ? sliced[sliced.length - 1]?.id || null : null,
+      hasMore,
+      limit,
+    },
+  });
+});
+
+app.get("/api/advisors/:userId", async (req, res) => {
+  if (!FEATURE_ADVISOR_PROFILES) {
+    return sendError(res, {
+      status: 404,
+      code: "FEATURE_DISABLED",
+      message: "Advisor profiles are disabled",
+    });
+  }
+
+  const viewer = await getOptionalAuthUser(req);
+  const profile = await prisma.advisorProfile.findFirst({
+    where: {
+      userId: req.params.userId,
+      isPublic: true,
+    },
+    include: {
+      user: { select: { id: true, name: true, role: true } },
+    },
+  });
+
+  if (!profile) {
+    return sendError(res, {
+      status: 404,
+      code: "ADVISOR_NOT_FOUND",
+      message: "Advisor profile not found",
+    });
+  }
+
+  let isFollowing = false;
+  if (viewer) {
+    const link = await prisma.advisorFollow.findUnique({
+      where: {
+        followerId_advisorId: {
+          followerId: viewer.id,
+          advisorId: profile.userId,
+        },
+      },
+    });
+    isFollowing = Boolean(link);
+  }
+
+  return res.json({ advisor: sanitizeAdvisorProfile(profile, { isFollowing }) });
+});
+
+app.post("/api/advisors/:userId/follow", authRequired, async (req, res) => {
+  if (!FEATURE_ADVISOR_PROFILES) {
+    return sendError(res, {
+      status: 404,
+      code: "FEATURE_DISABLED",
+      message: "Advisor profiles are disabled",
+    });
+  }
+
+  if (req.params.userId === req.user.id) {
+    return sendError(res, {
+      status: 400,
+      code: "SELF_FOLLOW_NOT_ALLOWED",
+      message: "You cannot follow yourself",
+    });
+  }
+
+  const profile = await prisma.advisorProfile.findFirst({
+    where: { userId: req.params.userId, isPublic: true },
+  });
+  if (!profile) {
+    return sendError(res, {
+      status: 404,
+      code: "ADVISOR_NOT_FOUND",
+      message: "Advisor profile not found",
+    });
+  }
+
+  await prisma.advisorFollow.upsert({
+    where: {
+      followerId_advisorId: {
+        followerId: req.user.id,
+        advisorId: req.params.userId,
+      },
+    },
+    create: {
+      followerId: req.user.id,
+      advisorId: req.params.userId,
+    },
+    update: {},
+  });
+
+  const followersCount = await prisma.advisorFollow.count({
+    where: { advisorId: req.params.userId },
+  });
+
+  await prisma.advisorProfile.update({
+    where: { userId: req.params.userId },
+    data: { followersCount },
+  });
+
+  return res.status(201).json({ success: true, followersCount });
+});
+
+app.delete("/api/advisors/:userId/follow", authRequired, async (req, res) => {
+  if (!FEATURE_ADVISOR_PROFILES) {
+    return sendError(res, {
+      status: 404,
+      code: "FEATURE_DISABLED",
+      message: "Advisor profiles are disabled",
+    });
+  }
+
+  await prisma.advisorFollow.deleteMany({
+    where: {
+      followerId: req.user.id,
+      advisorId: req.params.userId,
+    },
+  });
+
+  const followersCount = await prisma.advisorFollow.count({
+    where: { advisorId: req.params.userId },
+  });
+
+  await prisma.advisorProfile.updateMany({
+    where: { userId: req.params.userId },
+    data: { followersCount },
+  });
+
+  return res.json({ success: true, followersCount });
+});
+
+app.get("/api/dashboard/summary", authRequired, async (req, res) => {
+  const [questionsAsked, repliesReceived, savedAdvice, followedAdvisors] = await Promise.all([
+    prisma.advice.count({ where: { authorId: req.user.id } }),
+    prisma.adviceComment.count({
+      where: {
+        advice: { authorId: req.user.id },
+        authorId: { not: req.user.id },
+      },
+    }),
+    prisma.savedAdvice.count({ where: { userId: req.user.id } }),
+    prisma.advisorFollow.count({ where: { followerId: req.user.id } }),
+  ]);
+
+  return res.json({
+    stats: {
+      questionsAsked,
+      repliesReceived,
+      savedAdvice,
+      followedAdvisors,
+      activityScore: questionsAsked * 2 + repliesReceived + followedAdvisors,
+    },
+  });
 });
 
 app.post("/api/advice/:id/follow", authRequired, async (req, res) => {
@@ -4701,6 +5367,64 @@ app.delete("/api/advice/:id/follow", authRequired, async (req, res) => {
   return res.json({ success: true });
 });
 
+app.get("/api/advice/saved", authRequired, async (req, res) => {
+  const saved = await prisma.savedAdvice.findMany({
+    where: { userId: req.user.id },
+    orderBy: { createdAt: "desc" },
+    include: {
+      advice: {
+        include: {
+          author: { include: { advisorProfile: true } },
+          category: true,
+          group: true,
+        },
+      },
+    },
+  });
+
+  return res.json({
+    advices: saved.map((entry) => sanitizeAdvice(entry.advice)),
+  });
+});
+
+app.post("/api/advice/:id/save", authRequired, async (req, res) => {
+  const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
+  if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
+  }
+
+  await prisma.savedAdvice.upsert({
+    where: {
+      adviceId_userId: {
+        adviceId: advice.id,
+        userId: req.user.id,
+      },
+    },
+    create: {
+      adviceId: advice.id,
+      userId: req.user.id,
+    },
+    update: {},
+  });
+
+  return res.status(201).json({ success: true });
+});
+
+app.delete("/api/advice/:id/save", authRequired, async (req, res) => {
+  await prisma.savedAdvice.deleteMany({
+    where: {
+      adviceId: req.params.id,
+      userId: req.user.id,
+    },
+  });
+
+  return res.json({ success: true });
+});
+
 app.get("/api/advice/:id/boost/status", async (req, res) => {
   await clearExpiredBoosts();
 
@@ -4727,7 +5451,7 @@ app.post("/api/advice/:id/boost/checkout", authRequired, async (req, res) => {
 
     const advice = await prisma.advice.findUnique({
       where: { id: req.params.id },
-      include: { author: true, category: true, group: true },
+      include: { author: { include: { advisorProfile: true } }, category: true, group: true },
     });
 
     if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
@@ -4796,7 +5520,7 @@ app.post("/api/advice/:id/boost/checkout", authRequired, async (req, res) => {
           boostActivatedAt: new Date(),
           boostExpiresAt: expiresAt,
         },
-        include: { author: true, category: true, group: true },
+        include: { author: { include: { advisorProfile: true } }, category: true, group: true },
       });
 
       return { order, advice: updatedAdvice };
@@ -4840,7 +5564,7 @@ app.get("/api/advice/:id", async (req, res) => {
   const advice = await prisma.advice.findUnique({
     where: { id: req.params.id },
     include: {
-      author: true,
+      author: { include: { advisorProfile: true } },
       category: true,
       group: true,
       comments: {
@@ -4890,6 +5614,10 @@ app.get("/api/advice/:id", async (req, res) => {
     comments: advice.comments.map((comment) => ({
       id: comment.id,
       body: comment.body,
+      messageType: comment.messageType || ADVICE_COMMENT_TYPE.TEXT,
+      audioUrl: comment.audioUrl || null,
+      audioDurationSec: comment.audioDurationSec || null,
+      transcript: comment.transcript || null,
       parentId: comment.parentId,
       createdAt: comment.createdAt,
       author: { id: comment.author.id, name: comment.author.name },
@@ -4900,6 +5628,15 @@ app.get("/api/advice/:id", async (req, res) => {
 app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
   try {
     const data = commentSchema.parse(req.body);
+    const messageType = data.messageType || ADVICE_COMMENT_TYPE.TEXT;
+    if (messageType === ADVICE_COMMENT_TYPE.VOICE && !FEATURE_VOICE_REPLIES) {
+      return sendError(res, {
+        status: 403,
+        code: "VOICE_REPLY_DISABLED",
+        message: "Voice replies are disabled",
+      });
+    }
+
     const advice = await prisma.advice.findUnique({ where: { id: req.params.id } });
 
     if (!advice || advice.status !== ADVICE_STATUS.APPROVED) {
@@ -4918,12 +5655,23 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
       });
     }
 
+    const crisisMatches = FEATURE_CRISIS_DETECTION
+      ? detectCrisisKeywords(`${data.body || ""}\n${data.transcript || ""}`)
+      : [];
+
     const comment = await prisma.adviceComment.create({
       data: {
-        body: data.body,
+        body:
+          messageType === ADVICE_COMMENT_TYPE.VOICE
+            ? String(data.body || data.transcript || "[Voice reply]")
+            : String(data.body || ""),
         parentId: data.parentId || null,
         adviceId: advice.id,
         authorId: req.user.id,
+        messageType,
+        audioUrl: messageType === ADVICE_COMMENT_TYPE.VOICE ? data.audioUrl || null : null,
+        audioDurationSec: messageType === ADVICE_COMMENT_TYPE.VOICE ? data.audioDurationSec || null : null,
+        transcript: messageType === ADVICE_COMMENT_TYPE.VOICE ? data.transcript || null : null,
       },
       include: { author: true },
     });
@@ -4949,9 +5697,52 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
         userId: advice.authorId,
         type: NOTIFICATION_TYPES.NEW_COMMENT,
         title: "New comment on your advice",
-        body: `${req.user.name} commented on your advice thread.`,
+        body:
+          messageType === ADVICE_COMMENT_TYPE.VOICE
+            ? `${req.user.name} sent a voice reply on your advice thread.`
+            : `${req.user.name} commented on your advice thread.`,
         adviceId: advice.id,
         commentId: comment.id,
+      });
+    }
+
+    if (FEATURE_ADVISOR_PROFILES && req.user.role !== ROLES.MEMBER) {
+      const followers = await prisma.advisorFollow.findMany({
+        where: { advisorId: req.user.id },
+        select: { followerId: true },
+      });
+
+      await Promise.all(
+        followers
+          .filter((item) => item.followerId !== req.user.id)
+          .map((item) =>
+            createNotification({
+              userId: item.followerId,
+              type: NOTIFICATION_TYPES.ADVISOR_ACTIVITY,
+              title: "Advisor you follow replied",
+              body: `${req.user.name} replied to a thread.`,
+              adviceId: advice.id,
+              commentId: comment.id,
+            }),
+          ),
+      );
+    }
+
+    if (crisisMatches.length) {
+      await prisma.advice.update({
+        where: { id: advice.id },
+        data: {
+          isCrisisFlagged: true,
+          crisisKeywords: JSON.stringify(crisisMatches),
+          priorityTier: ADVICE_PRIORITY_TIER.URGENT,
+          priorityScore: 1200,
+        },
+      });
+
+      await notifyCrisisModerationQueue({
+        adviceId: advice.id,
+        actorName: req.user.name,
+        source: "a comment",
       });
     }
 
@@ -4959,6 +5750,10 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
       comment: {
         id: comment.id,
         body: comment.body,
+        messageType: comment.messageType || ADVICE_COMMENT_TYPE.TEXT,
+        audioUrl: comment.audioUrl || null,
+        audioDurationSec: comment.audioDurationSec || null,
+        transcript: comment.transcript || null,
         parentId: comment.parentId,
         createdAt: comment.createdAt,
         author: { id: comment.author.id, name: comment.author.name },
@@ -6037,8 +6832,15 @@ function emitPrivateMessage(targetUserId, message) {
   sockets.forEach((socket) => sendSocket(socket, payload));
 }
 
+function emitUserEvent(targetUserId, eventType, payload = {}) {
+  const sockets = socketsForUser(targetUserId);
+  const envelope = { type: eventType, ...payload };
+  sockets.forEach((socket) => sendSocket(socket, envelope));
+}
+
 realtimeHub.emitTicketMessage = emitTicketMessage;
 realtimeHub.emitPrivateMessage = emitPrivateMessage;
+realtimeHub.emitUserEvent = emitUserEvent;
 realtimeHub.notifyPresence = broadcastPresence;
 
 wss.on("connection", (ws) => {

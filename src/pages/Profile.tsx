@@ -3,6 +3,7 @@ import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
 import Button from "../components/Button";
 import {
+  getDashboardSummary,
   getMyBadges,
   getProfile,
   getWalletOverview,
@@ -35,6 +36,13 @@ export default function Profile() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [wallet, setWallet] = useState<WalletOverview | null>(null);
+  const [dashboardStats, setDashboardStats] = useState<{
+    questionsAsked: number;
+    repliesReceived: number;
+    savedAdvice: number;
+    followedAdvisors: number;
+    activityScore: number;
+  } | null>(null);
   const [badges, setBadges] = useState<BadgeDefinition[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [topupLoading, setTopupLoading] = useState(false);
@@ -53,14 +61,17 @@ export default function Profile() {
   const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
 
   async function loadProfile() {
-    const [profileData, walletData, badgeData] = await Promise.all([
-      getProfile(),
-      getWalletOverview(),
-      getMyBadges(),
-    ]);
+    const [profileData, walletData, badgeData, dashboardData] =
+      await Promise.all([
+        getProfile(),
+        getWalletOverview(),
+        getMyBadges(),
+        getDashboardSummary().catch(() => null),
+      ]);
     setProfile(profileData);
     setWallet(walletData);
     setBadges(badgeData.catalog);
+    setDashboardStats(dashboardData?.stats || null);
     setNameInput(profileData.name);
     setEmailInput(profileData.email);
     setBioInput(profileData.bio || "");
@@ -214,6 +225,25 @@ export default function Profile() {
           title="Profile settings"
           subtitle="Manage your identity, security, and personalized profile controls."
         />
+        {dashboardStats ? (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Questions {dashboardStats.questionsAsked}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Replies {dashboardStats.repliesReceived}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Saved {dashboardStats.savedAdvice}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Advisors {dashboardStats.followedAdvisors}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Activity {dashboardStats.activityScore}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">

@@ -22,6 +22,9 @@ import {
   GroupMember,
   HomeOverview,
   NotificationItem,
+  PublicFeedResponse,
+  AdvisorProfile,
+  DashboardSummary,
   ModerationAiHintResult,
   ModerationActivityItem,
   ModerationGroupRequest,
@@ -539,6 +542,25 @@ export async function listAdvice(
   return response.data.advices;
 }
 
+export async function listPublicFeed(options?: {
+  cursor?: string;
+  limit?: number;
+  categoryId?: string;
+  sort?: "TRENDING" | "LATEST";
+  query?: string;
+}): Promise<PublicFeedResponse> {
+  const response = await api.get<PublicFeedResponse>("/public/feed", {
+    params: {
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+      ...(options?.categoryId ? { categoryId: options.categoryId } : {}),
+      ...(options?.sort ? { sort: options.sort } : {}),
+      ...(options?.query ? { q: options.query } : {}),
+    },
+  });
+  return response.data;
+}
+
 export async function listCategories(): Promise<CategoryItem[]> {
   const response = await api.get<{ categories: CategoryItem[] }>("/categories");
   return response.data.categories;
@@ -615,10 +637,95 @@ export async function getAdviceDetail(id: string): Promise<{ advice: AdviceItem;
 
 export async function addAdviceComment(
   adviceId: string,
-  payload: { body: string; parentId?: string },
+  payload: {
+    body?: string;
+    parentId?: string;
+    messageType?: "TEXT" | "VOICE";
+    audioUrl?: string;
+    audioDurationSec?: number;
+    transcript?: string;
+  },
 ): Promise<AdviceComment> {
   const response = await api.post<{ comment: AdviceComment }>(`/advice/${adviceId}/comments`, payload);
   return response.data.comment;
+}
+
+export async function reactHelpful(
+  adviceId: string,
+  action: "add" | "remove" | "toggle" = "toggle",
+): Promise<{ adviceId: string; helpfulCount: number; reacted: boolean }> {
+  const response = await api.post<{ adviceId: string; helpfulCount: number; reacted: boolean }>(
+    `/advice/${adviceId}/reactions/helpful`,
+    { action },
+  );
+  return response.data;
+}
+
+export async function trackAdviceView(adviceId: string): Promise<{ adviceId: string; viewCount: number }> {
+  const response = await api.post<{ adviceId: string; viewCount: number }>(`/advice/${adviceId}/views`);
+  return response.data;
+}
+
+export async function listSavedAdvice(): Promise<AdviceItem[]> {
+  const response = await api.get<{ advices: AdviceItem[] }>("/advice/saved");
+  return response.data.advices;
+}
+
+export async function saveAdvice(adviceId: string): Promise<void> {
+  await api.post(`/advice/${adviceId}/save`);
+}
+
+export async function unsaveAdvice(adviceId: string): Promise<void> {
+  await api.delete(`/advice/${adviceId}/save`);
+}
+
+export async function createPriorityCheckout(adviceId: string, provider?: string): Promise<any> {
+  const response = await api.post(`/advice/${adviceId}/priority/checkout`, {
+    ...(provider ? { provider } : {}),
+  });
+  return response.data;
+}
+
+export async function listAdvisors(options?: {
+  cursor?: string;
+  limit?: number;
+  query?: string;
+  specialty?: string;
+  verifiedOnly?: boolean;
+}): Promise<{ items: AdvisorProfile[]; pageInfo: { nextCursor: string | null; hasMore: boolean; limit: number } }> {
+  const response = await api.get<{
+    items: AdvisorProfile[];
+    pageInfo: { nextCursor: string | null; hasMore: boolean; limit: number };
+  }>("/advisors", {
+    params: {
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+      ...(options?.query ? { q: options.query } : {}),
+      ...(options?.specialty ? { specialty: options.specialty } : {}),
+      ...(options?.verifiedOnly ? { verifiedOnly: true } : {}),
+    },
+  });
+  return response.data;
+}
+
+export async function getAdvisorProfile(userId: string): Promise<AdvisorProfile> {
+  const response = await api.get<{ advisor: AdvisorProfile }>(`/advisors/${userId}`);
+  return response.data.advisor;
+}
+
+export async function followAdvisor(userId: string): Promise<{ success: boolean; followersCount: number }> {
+  const response = await api.post<{ success: boolean; followersCount: number }>(`/advisors/${userId}/follow`);
+  return response.data;
+}
+
+export async function unfollowAdvisor(userId: string): Promise<{ success: boolean; followersCount: number }> {
+  const response = await api.delete<{ success: boolean; followersCount: number }>(`/advisors/${userId}/follow`);
+  return response.data;
+}
+
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  const response = await api.get<DashboardSummary>("/dashboard/summary");
+  return response.data;
 }
 
 export async function deleteMyAdviceComment(
@@ -729,4 +836,29 @@ export async function markNotificationRead(id: string, isRead: boolean): Promise
 
 export async function markAllNotificationsRead(): Promise<void> {
   await api.patch("/notifications/read-all");
+}
+
+export async function uploadMedia(file: File): Promise<{
+  fileUrl: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await api.post<{
+    data: {
+      fileUrl: string;
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+    };
+  }>("/uploads", formData, {
+    headers: {
+      "content-type": "multipart/form-data",
+    },
+  });
+
+  return response.data.data;
 }

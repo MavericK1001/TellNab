@@ -250,10 +250,18 @@ export type AdviceItem = {
   title: string;
   body: string;
   status: AdviceStatus;
+  visibility?: "PUBLIC" | "PRIVATE" | string;
   isLocked: boolean;
   isFeatured: boolean;
   isSpam: boolean;
+  isCrisisFlagged?: boolean;
+  crisisKeywords?: string | null;
   isBoostActive: boolean;
+  helpfulCount?: number;
+  viewCount?: number;
+  priorityTier?: "NORMAL" | "PRIORITY" | "URGENT" | string;
+  priorityScore?: number;
+  trendingScore?: number;
   boostExpiresAt?: string | null;
   holdReason?: string | null;
   followCount?: number;
@@ -275,6 +283,12 @@ export type AdviceItem = {
     id: string;
     name: string;
     role?: UserRole;
+    advisorProfile?: {
+      displayName: string;
+      isVerified: boolean;
+      ratingAvg: number;
+      totalReplies: number;
+    } | null;
   };
 };
 
@@ -336,11 +350,56 @@ export type GroupJoinRequest = {
 export type AdviceComment = {
   id: string;
   body: string;
+  messageType?: "TEXT" | "VOICE" | string;
+  audioUrl?: string | null;
+  audioDurationSec?: number | null;
+  transcript?: string | null;
   parentId?: string | null;
   createdAt: string;
   author: {
     id: string;
     name: string;
+  };
+};
+
+export type PublicFeedResponse = {
+  items: AdviceItem[];
+  pageInfo: {
+    nextCursor: string | null;
+    hasMore: boolean;
+    limit: number;
+    sort: "TRENDING" | "LATEST";
+  };
+};
+
+export type AdvisorProfile = {
+  id: string;
+  userId: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  specialties: string[];
+  isVerified: boolean;
+  rating: number;
+  ratingCount: number;
+  totalReplies: number;
+  responseTimeMins: number;
+  followersCount: number;
+  isFollowing: boolean;
+  user?: {
+    id: string;
+    name: string;
+    role?: UserRole;
+  } | null;
+};
+
+export type DashboardSummary = {
+  stats: {
+    questionsAsked: number;
+    repliesReceived: number;
+    savedAdvice: number;
+    followedAdvisors: number;
+    activityScore: number;
   };
 };
 

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { listNotifications } from "../services/api";
+import { NotificationItem } from "../types";
 
 const desktopBaseClass =
   "rounded-xl px-3 py-2 text-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60";
@@ -28,6 +30,11 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isCompact, setIsCompact] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [recentNotifications, setRecentNotifications] = useState<
+    NotificationItem[]
+  >([]);
+  const [notificationOpen, setNotificationOpen] = useState(false);
 
   useEffect(() => {
     function onScroll() {
@@ -38,6 +45,36 @@ export default function Navbar() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setUnreadCount(0);
+      setRecentNotifications([]);
+      return;
+    }
+
+    let alive = true;
+    async function loadNotifications() {
+      try {
+        const data = await listNotifications();
+        if (!alive) return;
+        setUnreadCount(data.unreadCount || 0);
+        setRecentNotifications(data.notifications.slice(0, 5));
+      } catch {
+        // ignore transient nav fetch errors
+      }
+    }
+
+    void loadNotifications();
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 25000);
+
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [user]);
 
   function closeMobileMenu() {
     setMobileOpen(false);
@@ -88,7 +125,7 @@ export default function Navbar() {
             {mobileOpen ? "Close" : "Menu"}
           </button>
 
-          <div className="hidden items-center gap-1.5 lg:flex">
+          <div className="relative hidden items-center gap-1.5 lg:flex">
             <NavLink
               to="/"
               className={({ isActive }) => desktopNavClass(isActive)}
@@ -122,6 +159,18 @@ export default function Navbar() {
 
             {user ? (
               <>
+                <button
+                  type="button"
+                  onClick={() => setNotificationOpen((value) => !value)}
+                  className="relative rounded-xl border border-white/10 bg-slate-900/75 px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10"
+                >
+                  Alerts
+                  {unreadCount > 0 ? (
+                    <span className="ml-2 rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                      {unreadCount}
+                    </span>
+                  ) : null}
+                </button>
                 <span className="mx-1 h-5 w-px bg-white/10" />
                 <NavLink
                   to="/messages"
@@ -162,6 +211,55 @@ export default function Navbar() {
             {!user ? (
               <>
                 <span className="mx-1 h-5 w-px bg-white/10" />
+
+                {user && notificationOpen ? (
+                  <div className="absolute right-0 top-12 z-40 w-80 rounded-2xl border border-white/10 bg-slate-900/95 p-3 shadow-2xl shadow-black/50">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-white">
+                        Notifications
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setNotificationOpen(false)}
+                        className="text-xs text-slate-400 hover:text-white"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    {recentNotifications.length === 0 ? (
+                      <p className="text-sm text-slate-400">
+                        No recent notifications.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {recentNotifications.map((item) => (
+                          <Link
+                            key={item.id}
+                            to={
+                              item.adviceId
+                                ? `/advice/${item.adviceId}`
+                                : "/notifications"
+                            }
+                            onClick={() => setNotificationOpen(false)}
+                            className="block rounded-xl border border-white/10 bg-slate-950/70 p-2 text-xs text-slate-200 hover:bg-slate-900"
+                          >
+                            <p className="font-semibold text-white">
+                              {item.title}
+                            </p>
+                            <p className="mt-0.5 text-slate-300">{item.body}</p>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    <Link
+                      to="/notifications"
+                      onClick={() => setNotificationOpen(false)}
+                      className="mt-3 inline-flex text-xs font-semibold text-violet-200 hover:text-violet-100"
+                    >
+                      Open notification center →
+                    </Link>
+                  </div>
+                ) : null}
                 <NavLink
                   to="/login"
                   className={({ isActive }) => desktopNavClass(isActive)}

@@ -11,6 +11,7 @@ import {
   generateCommentDraftWithAi,
   getAdviceDetail,
   moderateAdvice,
+  uploadMedia,
   unfollowAdviceThread,
   updateAdviceFlags,
 } from "../services/api";
@@ -26,6 +27,9 @@ export default function AdviceDetail() {
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<AdviceComment | null>(null);
   const [commentBody, setCommentBody] = useState("");
+  const [voiceFile, setVoiceFile] = useState<File | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceMode, setVoiceMode] = useState(false);
   const [commentAiLoading, setCommentAiLoading] = useState(false);
   const [commentAiSuggestions, setCommentAiSuggestions] = useState<string[]>(
     [],
@@ -121,8 +125,25 @@ export default function AdviceDetail() {
     if (!id) return;
 
     try {
-      await addAdviceComment(id, { body: commentBody, parentId: replyTo?.id });
+      if (voiceMode && voiceFile) {
+        const uploaded = await uploadMedia(voiceFile);
+        await addAdviceComment(id, {
+          parentId: replyTo?.id,
+          messageType: "VOICE",
+          audioUrl: uploaded.fileUrl,
+          transcript: voiceTranscript || undefined,
+          body: voiceTranscript || "Voice reply",
+        });
+      } else {
+        await addAdviceComment(id, {
+          body: commentBody,
+          parentId: replyTo?.id,
+        });
+      }
       setCommentBody("");
+      setVoiceFile(null);
+      setVoiceTranscript("");
+      setVoiceMode(false);
       setCommentAiSuggestions([]);
       setCommentAiProvider(null);
       setReplyTo(null);
@@ -279,7 +300,18 @@ export default function AdviceDetail() {
           depth > 0 ? "ml-4 mt-2" : ""
         }`}
       >
-        <p className="text-sm text-slate-200">{comment.body}</p>
+        {comment.messageType === "VOICE" && comment.audioUrl ? (
+          <div className="space-y-2">
+            <audio controls className="w-full">
+              <source src={comment.audioUrl} />
+            </audio>
+            {comment.transcript ? (
+              <p className="text-sm text-slate-300">{comment.transcript}</p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-200">{comment.body}</p>
+        )}
         <div className="mt-1 flex items-center justify-between gap-2">
           <p className="text-xs text-slate-400">{comment.author.name}</p>
           {user ? (
@@ -481,19 +513,52 @@ export default function AdviceDetail() {
             ) : null}
 
             <form className="mt-4 flex gap-2" onSubmit={onComment}>
-              <input
-                name="body"
-                required
-                value={commentBody}
-                onChange={(event) => setCommentBody(event.target.value)}
-                placeholder={replyTo ? "Write your reply" : "Write a comment"}
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
-              />
+              <div className="w-full space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVoiceMode((value) => !value)}
+                    className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-200"
+                  >
+                    {voiceMode ? "Text mode" : "Voice mode"}
+                  </button>
+                  {voiceMode ? (
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onChange={(event) =>
+                        setVoiceFile(event.target.files?.[0] || null)
+                      }
+                      className="text-xs text-slate-300"
+                    />
+                  ) : null}
+                </div>
+
+                {voiceMode ? (
+                  <input
+                    value={voiceTranscript}
+                    onChange={(event) => setVoiceTranscript(event.target.value)}
+                    placeholder="Optional transcript"
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                  />
+                ) : (
+                  <input
+                    name="body"
+                    required
+                    value={commentBody}
+                    onChange={(event) => setCommentBody(event.target.value)}
+                    placeholder={
+                      replyTo ? "Write your reply" : "Write a comment"
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                  />
+                )}
+              </div>
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => void onAiAssistComment()}
-                disabled={commentAiLoading}
+                disabled={commentAiLoading || voiceMode}
               >
                 {commentAiLoading ? "AI..." : "AI assist"}
               </Button>
