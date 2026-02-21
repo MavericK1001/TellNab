@@ -26,7 +26,13 @@ const updateTicketSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
-const messageSchema = z.object({ body: z.string().min(1).max(4000) });
+const messageSchema = z.object({
+  body: z.string().min(1).max(4000),
+  fileUrl: z.string().url().optional(),
+  fileName: z.string().max(255).optional(),
+  fileType: z.string().max(120).optional(),
+  fileSize: z.number().int().nonnegative().optional(),
+});
 const internalNoteSchema = z.object({ note: z.string().min(1).max(2000) });
 
 function ticketResource(ticket) {
@@ -50,8 +56,9 @@ function ticketResource(ticket) {
 }
 
 class TicketController {
-  constructor({ ticketService }) {
+  constructor({ ticketService, realtimeHub = null }) {
     this.ticketService = ticketService;
+    this.realtimeHub = realtimeHub;
   }
 
   create = async (req, res) => {
@@ -113,6 +120,22 @@ class TicketController {
         id: req.params.id,
         body,
       });
+
+      if (this.realtimeHub) {
+        this.realtimeHub.emitTicketMessage(req.params.id, {
+          id: message.id,
+          ticketId: req.params.id,
+          senderId: message.senderId,
+          senderRole: message.senderRole,
+          body: message.body,
+          createdAt: message.createdAt,
+          fileUrl: message.fileUrl,
+          fileName: message.fileName,
+          fileType: message.fileType,
+          fileSize: message.fileSize,
+        });
+      }
+
       return res.status(201).json({ data: message });
     } catch (error) {
       return this.handleError(error, res);

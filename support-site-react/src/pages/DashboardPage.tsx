@@ -11,7 +11,6 @@ import { TicketCard } from "../components/tickets/TicketCard";
 
 type Props = {
   user: AuthUser;
-  authToken?: string | null;
   loading: boolean;
   status: string;
   tickets: TicketRow[];
@@ -45,7 +44,6 @@ function resolveRoleView(user: AuthUser): "user" | "agent" | "admin" {
 export function DashboardPage(props: Props) {
   const {
     user,
-    authToken,
     loading,
     status,
     tickets,
@@ -104,7 +102,7 @@ export function DashboardPage(props: Props) {
 
   useEffect(() => {
     navigateToSection(activeSection);
-  }, []);
+  }, [activeSection]);
 
   const filteredTickets = useMemo(() => {
     if (roleView === "agent") {

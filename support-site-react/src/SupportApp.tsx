@@ -46,6 +46,7 @@ function AppRouter() {
   >({});
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [adminUsers, setAdminUsers] = useState<
     Array<{ id: string; name: string; email: string; role: string }>
   >([]);
@@ -113,16 +114,9 @@ function AppRouter() {
           navigate("/dashboard", { replace: true });
         }
       }
+      setBootstrapping(false);
     })();
   }, []);
-
-  useEffect(() => {
-    if (!authUser) return;
-    const timer = window.setInterval(() => {
-      refreshAllFor(authUser, authToken);
-    }, 20000);
-    return () => window.clearInterval(timer);
-  }, [authUser, authToken]);
 
   useEffect(() => {
     if (!selectedTicketId) return;
@@ -318,52 +312,57 @@ function AppRouter() {
 
   return (
     <Suspense fallback={<div className="loading-fullscreen">Loading…</div>}>
-      <Routes>
-        <Route
-          path="/login"
-          element={
-            <LoginPage
-              loading={loading}
-              status={status}
-              onSubmit={handleLogin}
-              onUseSession={handleUseSession}
-            />
-          }
-        />
-
-        <Route
-          path="/dashboard"
-          element={
-            authUser ? (
-              <DashboardPage
-                user={authUser}
-                authToken={authToken}
+      {bootstrapping ? (
+        <div className="loading-fullscreen">Loading session…</div>
+      ) : (
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <LoginPage
                 loading={loading}
                 status={status}
-                tickets={tickets}
-                selectedTicketId={selectedTicketId}
-                messages={selectedMessages}
-                roleOptions={roleOptions}
-                adminUsers={adminUsers}
-                onOpenTicket={setSelectedTicketId}
-                onCreateTicket={handleCreateTicket}
-                onSendMessage={handleSendMessage}
-                onRefresh={refreshAll}
-                onUpdateStatus={handleUpdateStatus}
-                onRoleUpdate={handleRoleUpdate}
-                onLogout={handleLogout}
+                onSubmit={handleLogin}
+                onUseSession={handleUseSession}
               />
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
-        />
+            }
+          />
 
-        <Route
-          path="*"
-          element={<Navigate to={authUser ? "/dashboard" : "/login"} replace />}
-        />
-      </Routes>
+          <Route
+            path="/dashboard"
+            element={
+              authUser ? (
+                <DashboardPage
+                  user={authUser}
+                  loading={loading}
+                  status={status}
+                  tickets={tickets}
+                  selectedTicketId={selectedTicketId}
+                  messages={selectedMessages}
+                  roleOptions={roleOptions}
+                  adminUsers={adminUsers}
+                  onOpenTicket={setSelectedTicketId}
+                  onCreateTicket={handleCreateTicket}
+                  onSendMessage={handleSendMessage}
+                  onRefresh={refreshAll}
+                  onUpdateStatus={handleUpdateStatus}
+                  onRoleUpdate={handleRoleUpdate}
+                  onLogout={handleLogout}
+                />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
+
+          <Route
+            path="*"
+            element={
+              <Navigate to={authUser ? "/dashboard" : "/login"} replace />
+            }
+          />
+        </Routes>
+      )}
     </Suspense>
   );
 }

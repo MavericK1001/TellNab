@@ -100,7 +100,7 @@ class TicketService {
   }
 
   async addMessage({ actorId, actorRole, id, body }) {
-    const message = await this.ticketRepository.createMessage({
+    const created = await this.ticketRepository.createMessage({
       ticketId: id,
       senderId: actorId,
       senderRole: actorRole,
@@ -111,10 +111,25 @@ class TicketService {
       ticketId: id,
       action: "MESSAGE_ADDED",
       performedBy: actorId,
-      metadata: JSON.stringify({ messageId: message.id }),
+      metadata: JSON.stringify({
+        messageId: created.id,
+        fileUrl: body.fileUrl || null,
+        fileName: body.fileName || null,
+        fileType: body.fileType || null,
+        fileSize: body.fileSize || null,
+      }),
     });
 
-    return message;
+    return {
+      ...created,
+      senderId: created.senderId,
+      senderRole: created.senderRole,
+      createdAt: created.createdAt,
+      fileUrl: body.fileUrl || undefined,
+      fileName: body.fileName || undefined,
+      fileType: body.fileType || undefined,
+      fileSize: body.fileSize || undefined,
+    };
   }
 
   async addInternalNote({ actorId, id, note }) {

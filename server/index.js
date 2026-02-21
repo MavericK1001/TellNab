@@ -1,4 +1,6 @@
 const path = require("node:path");
+const fs = require("node:fs");
+const http = require("node:http");
 const dotenv = require("dotenv");
 
 const defaultEnvFile =
@@ -16,6 +18,8 @@ const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const rateLimit = require("express-rate-limit");
+const multer = require("multer");
+const { WebSocketServer } = require("ws");
 const { z } = require("zod");
 const { PrismaClient } = require("@prisma/client");
 const { createSupportModule } = require("../modules/Support");
@@ -218,6 +222,26 @@ app.use(cookieParser());
 app.use(express.json({ limit: "32kb" }));
 app.locals.prisma = prisma;
 
+const uploadsDir = path.resolve(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadsDir));
+
+const uploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadsDir),
+  filename: (_req, file, cb) => {
+    const safeExt = path.extname(file.originalname || "") || "";
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${safeExt}`);
+  },
+});
+const upload = multer({
+  storage: uploadStorage,
+  limits: {
+    fileSize: Number(process.env.SUPPORT_UPLOAD_MAX_BYTES || 10 * 1024 * 1024),
+  },
+});
+
 const authLimiter = rateLimit({
   windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
   max: AUTH_RATE_LIMIT_MAX,
@@ -346,8 +370,14 @@ function supportStaffRequired(req, res, next) {
   return next();
 }
 
+const realtimeHub = {
+  emitTicketMessage: (_ticketId, _message) => {},
+  emitPrivateMessage: (_targetUserId, _message) => {},
+  notifyPresence: () => {},
+};
+
 if (String(process.env.ENABLE_SUPPORT_V2 || "true").toLowerCase() !== "false") {
-  const supportModuleRouter = createSupportModule({ authRequired });
+  const supportModuleRouter = createSupportModule({ authRequired, realtimeHub });
   const supportApiPrefixes = [
     "/api/tickets",
     "/api/departments",
@@ -3293,6 +3323,27 @@ app.get("/api/auth/me", authRequired, (req, res) => {
   return res.json({ user: sanitizeUser(req.user) });
 });
 
+app.post("/api/uploads", authRequired, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file provided" });
+    }
+
+    const fileUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+
+    return res.status(201).json({
+      data: {
+        fileUrl,
+        fileName: req.file.originalname,
+        fileType: req.file.mimetype || "application/octet-stream",
+        fileSize: Number(req.file.size || 0),
+      },
+    });
+  } catch {
+    return res.status(500).json({ message: "File upload failed" });
+  }
+});
+
 app.get("/api/users/search", authRequired, async (req, res) => {
   try {
     const { q } = userSearchQuerySchema.parse({
@@ -5914,6 +5965,204 @@ app.use((err, _req, res, _next) => {
   return res.status(500).json({ message: "Internal server error" });
 });
 
-app.listen(PORT, () => {
+const httpServer = http.createServer(app);
+const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+
+const activeUsers = new Map(); // userId -> Set<WebSocket>
+const ticketRooms = new Map(); // ticketId -> Set<WebSocket>
+const socketMeta = new WeakMap(); // socket -> { userId, name, role, tickets:Set<string> }
+
+function sendSocket(ws, payload) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify(payload));
+}
+
+function socketsForUser(userId) {
+  return activeUsers.get(String(userId)) || new Set();
+}
+
+function broadcastPresence() {
+  const agents = [];
+  for (const [userId, sockets] of activeUsers.entries()) {
+    const first = sockets.values().next().value;
+    const meta = first ? socketMeta.get(first) : null;
+    if (!meta) continue;
+    const role = String(meta.role || "").toUpperCase();
+    if (![ROLES.SUPPORT_MEMBER, ROLES.MODERATOR, ROLES.ADMIN].includes(role)) continue;
+    agents.push({ id: userId, name: meta.name || "Agent", role });
+  }
+
+  const payload = { type: "presence_update", agents };
+  for (const sockets of activeUsers.values()) {
+    for (const socket of sockets) {
+      sendSocket(socket, payload);
+      sendSocket(socket, { type: "presence", agents });
+    }
+  }
+}
+
+function joinTicketRoom(ws, ticketId) {
+  const roomId = String(ticketId || "").trim();
+  if (!roomId) return;
+  if (!ticketRooms.has(roomId)) {
+    ticketRooms.set(roomId, new Set());
+  }
+  ticketRooms.get(roomId).add(ws);
+  const meta = socketMeta.get(ws);
+  if (meta) {
+    meta.tickets.add(roomId);
+  }
+}
+
+function leaveTicketRoom(ws, ticketId) {
+  const roomId = String(ticketId || "").trim();
+  if (!roomId) return;
+  const room = ticketRooms.get(roomId);
+  if (!room) return;
+  room.delete(ws);
+  if (room.size === 0) ticketRooms.delete(roomId);
+  const meta = socketMeta.get(ws);
+  if (meta) meta.tickets.delete(roomId);
+}
+
+function emitTicketMessage(ticketId, message) {
+  const roomId = String(ticketId || "").trim();
+  const room = ticketRooms.get(roomId);
+  if (!room) return;
+  const payload = { type: "ticket_message_received", ...message, ticketId: roomId };
+  room.forEach((socket) => sendSocket(socket, payload));
+}
+
+function emitPrivateMessage(targetUserId, message) {
+  const sockets = socketsForUser(targetUserId);
+  const payload = { type: "private_message_received", ...message };
+  sockets.forEach((socket) => sendSocket(socket, payload));
+}
+
+realtimeHub.emitTicketMessage = emitTicketMessage;
+realtimeHub.emitPrivateMessage = emitPrivateMessage;
+realtimeHub.notifyPresence = broadcastPresence;
+
+wss.on("connection", (ws) => {
+  socketMeta.set(ws, { userId: null, name: "", role: "", tickets: new Set() });
+
+  ws.on("message", async (raw) => {
+    let payload = null;
+    try {
+      payload = JSON.parse(String(raw || "{}"));
+    } catch {
+      return;
+    }
+
+    const type = String(payload?.type || "");
+
+    if (type === "auth") {
+      try {
+        let user = null;
+        if (payload.token) {
+          const decoded = jwt.verify(String(payload.token), JWT_SECRET);
+          user = await prisma.user.findUnique({ where: { id: decoded.sub } });
+        } else if (payload.userId) {
+          user = await prisma.user.findUnique({ where: { id: String(payload.userId) } });
+        }
+
+        if (!user || !user.isActive) {
+          sendSocket(ws, { type: "auth_error", message: "Unauthorized" });
+          ws.close();
+          return;
+        }
+
+        const meta = socketMeta.get(ws);
+        meta.userId = user.id;
+        meta.name = user.name;
+        meta.role = user.role;
+
+        if (!activeUsers.has(user.id)) {
+          activeUsers.set(user.id, new Set());
+        }
+        activeUsers.get(user.id).add(ws);
+
+        sendSocket(ws, { type: "agent_online", userId: user.id });
+        broadcastPresence();
+      } catch {
+        sendSocket(ws, { type: "auth_error", message: "Unauthorized" });
+        ws.close();
+      }
+      return;
+    }
+
+    const meta = socketMeta.get(ws);
+    if (!meta?.userId) {
+      sendSocket(ws, { type: "auth_error", message: "Unauthorized" });
+      return;
+    }
+
+    if (type === "join_ticket_room" || type === "ticket.join") {
+      joinTicketRoom(ws, payload.ticketId);
+      return;
+    }
+
+    if (type === "leave_ticket_room" || type === "ticket.leave") {
+      leaveTicketRoom(ws, payload.ticketId);
+      return;
+    }
+
+    if (type === "ticket_message_sent" || type === "ticket.message") {
+      const msg = {
+        id: payload.id || `ws-${Date.now()}`,
+        ticketId: String(payload.ticketId || ""),
+        senderId: meta.userId,
+        senderRole: meta.role,
+        body: String(payload.body || ""),
+        createdAt: payload.createdAt || new Date().toISOString(),
+        fileUrl: payload.fileUrl,
+        fileName: payload.fileName,
+        fileType: payload.fileType,
+        fileSize: payload.fileSize,
+      };
+      emitTicketMessage(msg.ticketId, msg);
+      return;
+    }
+
+    if (type === "private_message_sent" || type === "dm") {
+      const dm = {
+        id: payload.id || `dm-${Date.now()}`,
+        from: meta.userId,
+        to: String(payload.to || ""),
+        body: String(payload.body || ""),
+        at: payload.at || new Date().toISOString(),
+      };
+      emitPrivateMessage(dm.to, dm);
+      sendSocket(ws, { type: "private_message_received", ...dm });
+    }
+  });
+
+  ws.on("close", () => {
+    const meta = socketMeta.get(ws);
+    if (!meta) return;
+
+    if (meta.tickets?.size) {
+      for (const ticketId of meta.tickets) {
+        leaveTicketRoom(ws, ticketId);
+      }
+    }
+
+    if (meta.userId && activeUsers.has(meta.userId)) {
+      const set = activeUsers.get(meta.userId);
+      set.delete(ws);
+      if (set.size === 0) {
+        activeUsers.delete(meta.userId);
+        for (const sockets of activeUsers.values()) {
+          for (const socket of sockets) {
+            sendSocket(socket, { type: "agent_offline", userId: meta.userId });
+          }
+        }
+      }
+      broadcastPresence();
+    }
+  });
+});
+
+httpServer.listen(PORT, () => {
   console.log(`TellNab API running on http://localhost:${PORT}`);
 });

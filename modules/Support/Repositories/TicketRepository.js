@@ -79,7 +79,14 @@ class TicketRepository {
   }
 
   async createMessage(data) {
-    return this.prisma.ticketMessage.create({ data });
+    return this.prisma.ticketMessage.create({
+      data,
+      include: {
+        sender: {
+          select: { id: true, name: true, email: true, role: true },
+        },
+      },
+    });
   }
 
   async createInternalNote(data) {

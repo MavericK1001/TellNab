@@ -69,9 +69,19 @@ export function SocketProvider({ children }: PropsWithChildren) {
 
   const connect = useCallback(() => {
     if (!WS_URL || !authUser) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const metaToken = (wsRef.current as any).__authToken;
+      const metaUserId = (wsRef.current as any).__authUserId;
+      if (metaToken === (authToken || "") && metaUserId === authUser.id) {
+        return;
+      }
+      wsRef.current.close();
+    }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
     const ws = new WebSocket(WS_URL);
+    (ws as any).__authToken = authToken || "";
+    (ws as any).__authUserId = authUser.id;
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -101,12 +111,18 @@ export function SocketProvider({ children }: PropsWithChildren) {
       try {
         const payload = JSON.parse(String(event.data || "{}"));
 
-        if (payload.type === "presence" && Array.isArray(payload.agents)) {
+        if (
+          (payload.type === "presence" || payload.type === "presence_update") &&
+          Array.isArray(payload.agents)
+        ) {
           setOnlineAgents(payload.agents);
           return;
         }
 
-        if (payload.type === "ticket.message") {
+        if (
+          payload.type === "ticket_message_received" ||
+          payload.type === "ticket.message"
+        ) {
           const message: TicketSocketMessage = {
             id: payload.id || crypto.randomUUID(),
             ticketId: payload.ticketId,
@@ -125,7 +141,10 @@ export function SocketProvider({ children }: PropsWithChildren) {
           return;
         }
 
-        if (payload.type === "dm") {
+        if (
+          payload.type === "private_message_received" ||
+          payload.type === "dm"
+        ) {
           const dm: AgentDm = {
             id: payload.id || crypto.randomUUID(),
             from: payload.from,
@@ -166,12 +185,14 @@ export function SocketProvider({ children }: PropsWithChildren) {
       wsRef.current.readyState !== WebSocket.OPEN
     )
       return;
-    wsRef.current.send(JSON.stringify({ type: "ticket.join", ticketId }));
+    wsRef.current.send(JSON.stringify({ type: "join_ticket_room", ticketId }));
   }, []);
 
   const emitTicketMessage = useCallback((message: TicketSocketMessage) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "ticket.message", ...message }));
+    wsRef.current.send(
+      JSON.stringify({ type: "ticket_message_sent", ...message }),
+    );
   }, []);
 
   const subscribeTicketMessages = useCallback(
@@ -194,7 +215,9 @@ export function SocketProvider({ children }: PropsWithChildren) {
   const sendAgentDm = useCallback((to: string, body: string) => {
     if (!to || !body.trim()) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "dm", to, body: body.trim() }));
+    wsRef.current.send(
+      JSON.stringify({ type: "private_message_sent", to, body: body.trim() }),
+    );
   }, []);
 
   const subscribeAgentDm = useCallback((cb: (message: AgentDm) => void) => {
