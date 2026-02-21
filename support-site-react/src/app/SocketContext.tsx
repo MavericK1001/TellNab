@@ -48,30 +48,61 @@ type SocketContextValue = {
 
 const SocketContext = createContext<SocketContextValue | null>(null);
 
-function resolveWsUrl() {
-  const explicit =
-    (window as any).SUPPORT_WS_URL ||
-    (window as any).SUPPORT_AGENT_CHAT_WS_URL ||
-    "";
-
-  if (explicit) return String(explicit);
-
-  const apiBase = String((window as any).SUPPORT_API_BASE || "").trim();
-  if (apiBase) {
+function resolveWsUrls() {
+  const toWsFromHttp = (value: string) => {
     try {
-      const parsed = new URL(apiBase, window.location.origin);
+      const parsed = new URL(value, window.location.origin);
       const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
       return `${protocol}//${parsed.host}/ws`;
     } catch {
-      // continue to origin fallback
+      return "";
     }
-  }
+  };
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws`;
+  const explicitRaw = String(
+    (window as any).SUPPORT_WS_URL ||
+      (window as any).SUPPORT_AGENT_CHAT_WS_URL ||
+      "",
+  ).trim();
+
+  const apiBase = String((window as any).SUPPORT_API_BASE || "").trim();
+  const isSupportHost = /(^|\.)support\.tellnab\.com$/i.test(
+    window.location.hostname,
+  );
+  const explicit = (() => {
+    if (!explicitRaw) return "";
+    if (!isSupportHost) return explicitRaw;
+    try {
+      const parsed = new URL(explicitRaw, window.location.origin);
+      if (
+        /(^|\.)support\.tellnab\.com$/i.test(parsed.hostname) ||
+        !/(^|\.)tellnab\.onrender\.com$/i.test(parsed.hostname)
+      ) {
+        return "";
+      }
+    } catch {
+      // ignore parse issue and keep explicit as-is
+    }
+    return explicitRaw;
+  })();
+
+  return Array.from(
+    new Set(
+      [
+        explicit,
+        toWsFromHttp(apiBase),
+        ...(isSupportHost ? ["wss://tellnab.onrender.com/ws"] : []),
+        ...(!isSupportHost ? [`${protocol}//${window.location.host}/ws`] : []),
+        ...(!isSupportHost
+          ? ["wss://tellnab.com/ws", "wss://tellnab.onrender.com/ws"]
+          : []),
+      ].filter(Boolean),
+    ),
+  );
 }
 
-const WS_URL = resolveWsUrl();
+const WS_URLS = resolveWsUrls();
 
 export function SocketProvider({ children }: PropsWithChildren) {
   const [connected, setConnected] = useState(false);
@@ -82,6 +113,7 @@ export function SocketProvider({ children }: PropsWithChildren) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const joinedTicketIdsRef = useRef<Set<string>>(new Set());
+  const wsUrlIndexRef = useRef(0);
 
   const ticketListenersRef = useRef<
     Map<string, Set<(message: TicketSocketMessage) => void>>
@@ -89,7 +121,7 @@ export function SocketProvider({ children }: PropsWithChildren) {
   const dmListenersRef = useRef<Set<(message: AgentDm) => void>>(new Set());
 
   const connect = useCallback(() => {
-    if (!WS_URL || !authUser) {
+    if (!WS_URLS.length || !authUser) {
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -108,7 +140,8 @@ export function SocketProvider({ children }: PropsWithChildren) {
     }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(WS_URL);
+    const wsUrl = WS_URLS[wsUrlIndexRef.current % WS_URLS.length];
+    const ws = new WebSocket(wsUrl);
     (ws as any).__authToken = authToken || "";
     (ws as any).__authUserId = authUser.id;
     wsRef.current = ws;
@@ -139,6 +172,9 @@ export function SocketProvider({ children }: PropsWithChildren) {
 
     ws.onclose = () => {
       setConnected(false);
+      if (WS_URLS.length > 1) {
+        wsUrlIndexRef.current = (wsUrlIndexRef.current + 1) % WS_URLS.length;
+      }
       if (reconnectTimerRef.current) {
         window.clearTimeout(reconnectTimerRef.current);
       }
@@ -223,7 +259,9 @@ export function SocketProvider({ children }: PropsWithChildren) {
     if (!roomId) return;
     joinedTicketIdsRef.current.add(roomId);
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "join_ticket_room", ticketId: roomId }));
+    wsRef.current.send(
+      JSON.stringify({ type: "join_ticket_room", ticketId: roomId }),
+    );
   }, []);
 
   const emitTicketMessage = useCallback((message: TicketSocketMessage) => {

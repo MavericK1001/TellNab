@@ -66,7 +66,17 @@ function registerTicketRoutes({ router, supportAuthGuard, permissionPolicy, tick
   });
 
   router.get("/api/roles", supportAuthGuard, requirePermission(PERMISSION.RBAC_MANAGE), async (_req, res) => {
-    return res.status(501).json({ message: "roles endpoint scaffolded" });
+    const roleKeys = Object.values(permissionPolicy.ROLE || {});
+    const roles = roleKeys.map((key) => ({
+      key,
+      name: String(key || "")
+        .toLowerCase()
+        .split("_")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" "),
+    }));
+
+    return res.json({ roles, data: roles });
   });
 
   router.get("/api/reports", supportAuthGuard, requirePermission(PERMISSION.REPORT_READ), async (_req, res) => {

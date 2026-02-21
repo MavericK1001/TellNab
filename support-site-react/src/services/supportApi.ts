@@ -9,15 +9,30 @@ const PRIMARY_API_BASE =
 const IS_LOCAL_HOST =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1";
+const IS_SUPPORT_HOST = /(^|\.)support\.tellnab\.com$/i.test(
+  window.location.hostname,
+);
+const CONFIGURED_SUPPORT_API_BASE = String(
+  (window as any).SUPPORT_API_BASE || "",
+).trim();
+const EFFECTIVE_SUPPORT_API_BASE =
+  IS_SUPPORT_HOST &&
+  CONFIGURED_SUPPORT_API_BASE &&
+  !/(^https?:\/\/)?([a-z0-9-]+\.)?tellnab\.onrender\.com(\/|$)/i.test(
+    CONFIGURED_SUPPORT_API_BASE,
+  )
+    ? ""
+    : CONFIGURED_SUPPORT_API_BASE;
 
 const API_BASE_CANDIDATES = Array.from(
   new Set(
     IS_LOCAL_HOST
       ? ["http://127.0.0.1:4000/api", "http://localhost:4000/api", PRIMARY_API_BASE, "/api"]
       : [
-          ...((window as any).SUPPORT_API_BASE ? [String((window as any).SUPPORT_API_BASE)] : []),
-          "https://tellnab.com/api",
-          "https://tellnab.onrender.com/api",
+          ...(EFFECTIVE_SUPPORT_API_BASE ? [EFFECTIVE_SUPPORT_API_BASE] : []),
+          ...(IS_SUPPORT_HOST
+            ? ["https://tellnab.onrender.com/api"]
+            : ["https://tellnab.com/api", "https://tellnab.onrender.com/api"]),
         ],
   ),
 );
@@ -26,6 +41,10 @@ let preferredApiBase: string | null = null;
 
 try {
   preferredApiBase = window.sessionStorage.getItem("tellnab_support_api_base");
+  if (IS_SUPPORT_HOST && preferredApiBase?.includes("tellnab.com/api")) {
+    preferredApiBase = null;
+    window.sessionStorage.removeItem("tellnab_support_api_base");
+  }
 } catch {
   preferredApiBase = null;
 }

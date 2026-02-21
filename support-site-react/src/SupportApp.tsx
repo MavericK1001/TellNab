@@ -56,11 +56,7 @@ function AppRouter() {
     "MODERATOR",
     "ADMIN",
   ]);
-  const {
-    setAuth,
-    joinTicketRoom,
-    subscribeTicketMessages,
-  } = useSocket();
+  const { setAuth, joinTicketRoom, subscribeTicketMessages } = useSocket();
 
   useEffect(() => {
     setAuth(authUser, authToken);
