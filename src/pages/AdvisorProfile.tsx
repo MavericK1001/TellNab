@@ -88,13 +88,18 @@ export default function AdvisorProfile() {
               Verified
             </span>
           ) : null}
+          {advisor.level ? (
+            <span className="rounded-full border border-violet-300/30 bg-violet-500/12 px-3 py-1 text-xs font-semibold text-violet-100">
+              {advisor.level.replaceAll("_", " ")}
+            </span>
+          ) : null}
         </div>
 
         {advisor.bio ? (
           <p className="mt-3 text-sm text-slate-300">{advisor.bio}</p>
         ) : null}
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
             <p className="text-xs text-slate-400">Rating</p>
             <p className="text-lg font-semibold text-white">
@@ -105,6 +110,12 @@ export default function AdvisorProfile() {
             <p className="text-xs text-slate-400">Replies</p>
             <p className="text-lg font-semibold text-white">
               {advisor.totalReplies}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+            <p className="text-xs text-slate-400">Helpful</p>
+            <p className="text-lg font-semibold text-white">
+              {advisor.helpfulCount || 0}
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3">

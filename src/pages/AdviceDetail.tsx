@@ -10,6 +10,7 @@ import {
   followAdviceThread,
   generateCommentDraftWithAi,
   getAdviceDetail,
+  getQuestionShareMeta,
   moderateAdvice,
   uploadMedia,
   unfollowAdviceThread,
@@ -44,6 +45,10 @@ export default function AdviceDetail() {
   const [moderationMessage, setModerationMessage] = useState<string | null>(
     null,
   );
+  const [shareMeta, setShareMeta] = useState<{
+    shareUrl: string;
+    whatsappUrl: string;
+  } | null>(null);
   const boostPriceUsd = Number(import.meta.env.VITE_BOOST_PRICE_USD || 4.99);
   const isModeratorOrAdmin =
     user?.role === "ADMIN" || user?.role === "MODERATOR";
@@ -108,11 +113,27 @@ export default function AdviceDetail() {
       const data = await getAdviceDetail(id);
       setAdvice(data.advice);
       setComments(data.comments);
+      try {
+        const share = await getQuestionShareMeta(id);
+        setShareMeta({
+          shareUrl: share.shareUrl,
+          whatsappUrl: share.whatsappUrl,
+        });
+      } catch {
+        setShareMeta(null);
+      }
     } catch {
       setError(
         "Unable to open this advice. It may still be pending or removed.",
       );
     }
+  }
+
+  async function onCopyShareLink() {
+    if (!shareMeta) return;
+    const absoluteUrl = `${window.location.origin}${shareMeta.shareUrl}`;
+    await navigator.clipboard.writeText(absoluteUrl);
+    setModerationMessage("Share link copied.");
   }
 
   useEffect(() => {
@@ -365,6 +386,18 @@ export default function AdviceDetail() {
         <p className="mt-2 text-xs text-slate-400">
           by {advice.author?.name || "Unknown"}
         </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {advice.isUrgent ? (
+            <span className="rounded-full border border-rose-300/35 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-100">
+              Urgent
+            </span>
+          ) : null}
+          {advice.author?.advisorProfile?.level ? (
+            <span className="rounded-full border border-violet-300/30 bg-violet-500/15 px-2.5 py-1 text-[11px] font-semibold text-violet-100">
+              {advice.author.advisorProfile.level.replaceAll("_", " ")}
+            </span>
+          ) : null}
+        </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-slate-400">
             Followers: {advice.followCount || 0}
@@ -388,6 +421,31 @@ export default function AdviceDetail() {
             </button>
           ) : null}
         </div>
+        {shareMeta ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <a
+              href={shareMeta.whatsappUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-emerald-300/25 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-100"
+            >
+              Share WhatsApp
+            </a>
+            <button
+              type="button"
+              onClick={() => void onCopyShareLink()}
+              className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200"
+            >
+              Copy link
+            </button>
+            <a
+              href={shareMeta.shareUrl}
+              className="rounded-lg border border-violet-300/25 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100"
+            >
+              Open share card
+            </a>
+          </div>
+        ) : null}
         {advice.isLocked ? (
           <p className="mt-2 text-xs text-amber-200">Thread is locked.</p>
         ) : null}

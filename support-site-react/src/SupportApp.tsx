@@ -67,7 +67,8 @@ function AppRouter() {
     });
     return Array.from(deduped.values()).sort(
       (a, b) =>
-        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
+        new Date(a.createdAt || 0).getTime() -
+        new Date(b.createdAt || 0).getTime(),
     );
   }
 
@@ -172,7 +173,9 @@ function AppRouter() {
       try {
         const result = await listTicketMessages(selectedTicketId, authToken);
         if (!alive) return;
-        const incoming = normalizeMessages(Array.isArray(result?.data) ? result.data : []);
+        const incoming = normalizeMessages(
+          Array.isArray(result?.data) ? result.data : [],
+        );
         setMessagesByTicket((prev) => {
           const existing = prev[selectedTicketId] || [];
           const merged = normalizeMessages([...existing, ...incoming]);

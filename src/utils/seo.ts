@@ -4,6 +4,7 @@ type UseSeoOptions = {
   title: string;
   description: string;
   path?: string;
+  image?: string;
   robots?: string;
   structuredData?: Record<string, unknown>;
 };
@@ -22,6 +23,7 @@ export function useSeo({
   title,
   description,
   path,
+  image,
   robots = DEFAULT_ROBOTS,
   structuredData,
 }: UseSeoOptions) {
@@ -95,6 +97,26 @@ export function useSeo({
     });
     twitterDescription.content = description;
 
+    const absoluteImage = image
+      ? image.startsWith("http://") || image.startsWith("https://")
+        ? image
+        : `${siteUrl.replace(/\/$/, "")}${image.startsWith("/") ? "" : "/"}${image}`
+      : "";
+
+    const ogImage = upsertMeta('meta[property="og:image"]', () => {
+      const meta = document.createElement("meta");
+      meta.setAttribute("property", "og:image");
+      return meta;
+    });
+    ogImage.content = absoluteImage;
+
+    const twitterImage = upsertMeta('meta[name="twitter:image"]', () => {
+      const meta = document.createElement("meta");
+      meta.name = "twitter:image";
+      return meta;
+    });
+    twitterImage.content = absoluteImage;
+
     let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (!canonical) {
       canonical = document.createElement("link");
@@ -115,5 +137,5 @@ export function useSeo({
     } else if (existingLd) {
       existingLd.remove();
     }
-  }, [description, path, robots, structuredData, title]);
+  }, [description, image, path, robots, structuredData, title]);
 }

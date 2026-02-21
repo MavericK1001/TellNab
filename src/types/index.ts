@@ -257,6 +257,9 @@ export type AdviceItem = {
   isCrisisFlagged?: boolean;
   crisisKeywords?: string | null;
   isBoostActive: boolean;
+  isUrgent?: boolean;
+  tags?: string[] | null;
+  targetAudience?: string | null;
   helpfulCount?: number;
   viewCount?: number;
   priorityTier?: "NORMAL" | "PRIORITY" | "URGENT" | string;
@@ -288,6 +291,15 @@ export type AdviceItem = {
       isVerified: boolean;
       ratingAvg: number;
       totalReplies: number;
+      helpfulCount?: number;
+      responseTimeMins?: number;
+      level?:
+        | "NEW"
+        | "ACTIVE"
+        | "TOP_LISTENER"
+        | "PRO_ADVISOR"
+        | "ELITE_ADVISOR"
+        | string;
     } | null;
   };
 };
@@ -383,7 +395,16 @@ export type AdvisorProfile = {
   rating: number;
   ratingCount: number;
   totalReplies: number;
+  helpfulCount?: number;
   responseTimeMins: number;
+  level?:
+    | "NEW"
+    | "ACTIVE"
+    | "TOP_LISTENER"
+    | "PRO_ADVISOR"
+    | "ELITE_ADVISOR"
+    | string;
+  levelScore?: number;
   followersCount: number;
   isFollowing: boolean;
   user?: {
@@ -391,6 +412,24 @@ export type AdvisorProfile = {
     name: string;
     role?: UserRole;
   } | null;
+};
+
+export type PublicQuestionShare = {
+  question: {
+    id: string;
+    title: string;
+    body: string;
+    category?: { id: string; name: string } | null;
+    replyCount: number;
+    createdAt: string;
+    isUrgent?: boolean;
+    tags?: string[];
+  };
+  ctaUrl: string;
+  share: {
+    pageUrl: string;
+    ogImageUrl: string;
+  };
 };
 
 export type DashboardSummary = {

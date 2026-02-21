@@ -180,6 +180,11 @@ export default function Feed() {
                         Boosted
                       </span>
                     ) : null}
+                    {post.isUrgent ? (
+                      <span className="rounded-full border border-rose-300/35 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-100">
+                        Urgent
+                      </span>
+                    ) : null}
                     {post.priorityTier === "PRIORITY" ||
                     post.priorityTier === "URGENT" ? (
                       <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-200">
@@ -207,6 +212,11 @@ export default function Feed() {
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs text-slate-400">
                     <span>by {post.author?.name || "Unknown"}</span>
+                    {post.author?.advisorProfile?.level ? (
+                      <span className="rounded-full border border-violet-300/25 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-100">
+                        {post.author.advisorProfile.level.replaceAll("_", " ")}
+                      </span>
+                    ) : null}
                     {post.author?.advisorProfile?.isVerified ? (
                       <Link
                         to={`/advisors/${post.author.id}`}

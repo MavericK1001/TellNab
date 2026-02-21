@@ -13,3 +13,4 @@ export { default as MessagingCenter } from "./MessagingCenter";
 export { default as Terms } from "./Terms";
 export { default as Notifications } from "./Notifications";
 export { default as Groups } from "./Groups";
+export { default as QuestionShare } from "./QuestionShare";

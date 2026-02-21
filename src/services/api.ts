@@ -23,6 +23,7 @@ import {
   HomeOverview,
   NotificationItem,
   PublicFeedResponse,
+  PublicQuestionShare,
   AdvisorProfile,
   DashboardSummary,
   ModerationAiHintResult,
@@ -443,6 +444,9 @@ export async function createAdvice(payload: {
   body: string;
   categoryId?: string;
   groupId?: string;
+  tags?: string[];
+  targetAudience?: string;
+  isUrgent?: boolean;
 }): Promise<AdviceItem> {
   try {
     const data = await postWithFallback<{ advice: AdviceItem }>("/advice", payload);
@@ -492,6 +496,26 @@ export async function createAdvice(payload: {
 
     throw error;
   }
+}
+
+export async function getPublicQuestionShare(id: string): Promise<PublicQuestionShare> {
+  const response = await api.get<PublicQuestionShare>(`/public/q/${id}`);
+  return response.data;
+}
+
+export async function getQuestionShareMeta(id: string): Promise<{
+  id: string;
+  shareUrl: string;
+  ogImageUrl: string;
+  whatsappUrl: string;
+}> {
+  const response = await api.get<{
+    id: string;
+    shareUrl: string;
+    ogImageUrl: string;
+    whatsappUrl: string;
+  }>(`/questions/${id}/share`);
+  return response.data;
 }
 
 export async function generateAdviceDraftWithAi(payload: {

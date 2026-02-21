@@ -23,6 +23,14 @@ function parseApiError(error: unknown, fallback: string): string {
 }
 
 export default function Ask() {
+  const phaseUrgentMode =
+    String(import.meta.env.VITE_PHASE1_URGENT_MODE || "false").toLowerCase() ===
+    "true";
+  const phaseSmartMatching =
+    String(
+      import.meta.env.VITE_PHASE1_SMART_MATCHING || "false",
+    ).toLowerCase() === "true";
+
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -34,6 +42,9 @@ export default function Ask() {
   const [targetTone, setTargetTone] = useState<
     "balanced" | "direct" | "empathetic"
   >("balanced");
+  const [targetAudience, setTargetAudience] = useState("");
+  const [tagsInput, setTagsInput] = useState("");
+  const [isUrgent, setIsUrgent] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [aiProvider, setAiProvider] = useState<string | null>(null);
 
@@ -60,10 +71,23 @@ export default function Ask() {
     setStatus(null);
 
     try {
+      const tags = tagsInput
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .slice(0, 12);
+
       await createAdvice({
         title,
         body: `[Anonymous: ${anonymous ? "Yes" : "No"}]\n\n${question}`,
         categoryId: categoryId || undefined,
+        ...(phaseSmartMatching
+          ? {
+              tags,
+              targetAudience: targetAudience.trim() || undefined,
+            }
+          : {}),
+        ...(phaseUrgentMode ? { isUrgent } : {}),
       });
       setStatus(
         "Question submitted for moderation. You can track it in Advice.",
@@ -71,6 +95,9 @@ export default function Ask() {
       setTitle("");
       setQuestion("");
       setAnonymous(true);
+      setIsUrgent(false);
+      setTagsInput("");
+      setTargetAudience("");
       setAiSuggestions([]);
       setAiProvider(null);
       if (categories[0]?.id) {
@@ -171,7 +198,72 @@ export default function Ask() {
                   ))
                 )}
               </select>
+
+              {categories.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {categories.map((category) => {
+                    const active = categoryId === category.id;
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() => setCategoryId(category.id)}
+                        className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                          active
+                            ? "border-violet-300/70 bg-violet-500/20 text-violet-100"
+                            : "border-white/15 bg-slate-900/65 text-slate-300 hover:border-white/30"
+                        }`}
+                      >
+                        {category.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
+
+            {phaseUrgentMode ? (
+              <div className="rounded-xl border border-rose-300/25 bg-rose-500/10 p-3">
+                <label className="inline-flex items-center gap-2 text-sm text-rose-100">
+                  <input
+                    type="checkbox"
+                    checked={isUrgent}
+                    onChange={(event) => setIsUrgent(event.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 bg-slate-950"
+                  />
+                  Mark this question as urgent
+                </label>
+              </div>
+            ) : null}
+
+            {phaseSmartMatching ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-200">
+                    Tags (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={tagsInput}
+                    onChange={(event) => setTagsInput(event.target.value)}
+                    className="mt-2 block w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-violet-400/50 placeholder:text-slate-500 focus:ring"
+                    placeholder="career, startup, stress"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-200">
+                    Target audience (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={targetAudience}
+                    onChange={(event) => setTargetAudience(event.target.value)}
+                    className="mt-2 block w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-violet-400/50 placeholder:text-slate-500 focus:ring"
+                    placeholder="Students, founders, new parents"
+                  />
+                </div>
+              </div>
+            ) : null}
 
             <div>
               <label className="block text-sm font-medium text-slate-200">
@@ -240,7 +332,7 @@ export default function Ask() {
               ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-20 md:pb-0">
               <label className="inline-flex items-center gap-2 text-sm text-slate-300">
                 <input
                   type="checkbox"
@@ -260,6 +352,15 @@ export default function Ask() {
                   {loading ? "Publishing..." : "Publish question"}
                 </Button>
               </div>
+            </div>
+
+            <div className="fixed inset-x-0 bottom-14 z-20 border-t border-white/10 bg-slate-950/95 p-3 backdrop-blur md:hidden">
+              <Button
+                type="submit"
+                className={`w-full ${loading ? "opacity-70" : ""}`}
+              >
+                {loading ? "Publishing..." : "Publish question"}
+              </Button>
             </div>
 
             {status ? (

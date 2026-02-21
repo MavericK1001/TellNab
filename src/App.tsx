@@ -14,6 +14,7 @@ import {
   MessagingCenter,
   Notifications,
   Profile,
+  QuestionShare,
   Register,
   Terms,
 } from "./pages";
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/groups" element={<Groups />} />
           <Route path="/advice" element={<AdviceCenter />} />
           <Route path="/advice/:id" element={<AdviceDetail />} />
+          <Route path="/q/:id" element={<QuestionShare />} />
           <Route
             path="/messages"
             element={

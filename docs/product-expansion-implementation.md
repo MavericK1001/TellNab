@@ -119,3 +119,46 @@ Backend env flags in `server/index.js`:
 - `FEATURE_CRISIS_DETECTION` (default `true`)
 
 Set any flag to `false` for staged rollout.
+
+---
+
+## 7) Phase 1 core differentiators (production-safe extension)
+
+### Additive fields
+
+- `Advice.tags` (nullable JSON string)
+- `Advice.targetAudience` (nullable string)
+- `Advice.isUrgent` (bool default `false`)
+- `AdvisorProfile.helpfulCount` (int default `0`)
+- `AdvisorProfile.level` (string default `NEW`)
+- `AdvisorProfile.levelScore` (int default `0`)
+- `AdvisorProfile.statsUpdatedAt` (nullable datetime)
+- `AdvisorProfile.lastActiveAt` (nullable datetime)
+
+### Additive model
+
+- `AdviceAdvisorMatch` (cache table for ranked advisor matches with expiry)
+
+### Migration script
+
+- `prisma/migrations/20260221170000_phase1_core_differentiators/migration.sql`
+
+### Required Phase 1 flags
+
+- `PHASE1_SMART_MATCHING` (default `false`)
+- `PHASE1_ADVISOR_LEVELS` (default `false`)
+- `PHASE1_URGENT_MODE` (default `false`)
+- `PHASE1_SHARE_CARDS` (default `false`)
+
+### Migration and deploy order (zero-downtime)
+
+1. Deploy DB migration (`db push`/`migrate deploy`) before enabling flags.
+2. Regenerate Prisma client against live schema.
+3. Deploy backend and frontend with all Phase 1 flags still `false`.
+4. Enable flags incrementally and monitor logs/metrics.
+
+### Rollback
+
+- Turn Phase 1 flags back to `false`.
+- Keep additive columns/tables in place (no destructive rollback needed).
+- Redeploy previous backend/frontend artifact if required.

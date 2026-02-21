@@ -43,6 +43,7 @@ model User {
   advisorProfile      AdvisorProfile?
   advisorFollowers    AdvisorFollow[] @relation("AdvisorFollowedAdvisor")
   followedAdvisors    AdvisorFollow[] @relation("AdvisorFollower")
+  advisorMatches      AdviceAdvisorMatch[] @relation("AdviceAdvisorMatchAdvisor")
   walletTransactions  WalletTransaction[]
   walletActions       WalletTransaction[] @relation("WalletTransactionActor")
   badges              UserBadge[]
@@ -410,6 +411,9 @@ model Advice {
   boostActivatedAt DateTime?
   boostExpiresAt DateTime?
   holdReason    String?
+  tags          String?
+  targetAudience String?
+  isUrgent      Boolean  @default(false)
   categoryId    String?
   groupId       String?
   createdAt     DateTime @default(now())
@@ -433,6 +437,7 @@ model Advice {
   notifications Notification[]
   boostOrders   AdviceBoostOrder[]
   priorityOrders AdvicePriorityOrder[]
+  matchedAdvisors AdviceAdvisorMatch[]
 
   @@index([status, visibility, createdAt])
   @@index([status, categoryId, createdAt])
@@ -585,9 +590,14 @@ model AdvisorProfile {
   isVerified         Boolean  @default(false)
   responseTimeMins   Int      @default(1440)
   totalReplies       Int      @default(0)
+  helpfulCount       Int      @default(0)
   ratingAvg          Float    @default(0)
   ratingCount        Int      @default(0)
+  level              String   @default("NEW")
+  levelScore         Int      @default(0)
   followersCount     Int      @default(0)
+  statsUpdatedAt     DateTime?
+  lastActiveAt       DateTime?
   isPublic           Boolean  @default(true)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -607,6 +617,27 @@ model AdvisorFollow {
 
   @@unique([followerId, advisorId])
   @@index([advisorId, createdAt])
+}
+
+model AdviceAdvisorMatch {
+  id         String   @id @default(cuid())
+  score      Float    @default(0)
+  reason     String?
+  isUrgent   Boolean  @default(false)
+  notifiedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  adviceId String
+  advice   Advice @relation(fields: [adviceId], references: [id], onDelete: Cascade)
+
+  advisorId String
+  advisor   User @relation("AdviceAdvisorMatchAdvisor", fields: [advisorId], references: [id], onDelete: Cascade)
+
+  @@unique([adviceId, advisorId])
+  @@index([advisorId, createdAt])
+  @@index([expiresAt])
 }
 
 model AdvicePriorityOrder {
