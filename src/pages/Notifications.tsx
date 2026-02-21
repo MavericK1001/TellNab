@@ -30,6 +30,13 @@ export default function Notifications() {
       const data = await listNotifications();
       setNotifications(data.notifications);
       setUnreadCount(data.unreadCount);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("tellnab:notifications-updated", {
+            detail: { unreadCount: data.unreadCount },
+          }),
+        );
+      }
     } catch {
       setError("Failed to load notifications.");
     } finally {

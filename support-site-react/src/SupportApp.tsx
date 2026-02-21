@@ -101,6 +101,11 @@ function AppRouter() {
 
   useEffect(() => {
     (async () => {
+      if (!authToken) {
+        setBootstrapping(false);
+        return;
+      }
+
       const me = await getSessionUser(authToken).catch(() => null);
       if (me) {
         setAuthUser(me);
@@ -169,6 +174,11 @@ function AppRouter() {
   }
 
   async function handleUseSession() {
+    if (!authToken) {
+      setStatus("No active session found.");
+      return;
+    }
+
     setLoading(true);
     try {
       const user = await getSessionUser(authToken);

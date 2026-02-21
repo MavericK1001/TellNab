@@ -87,12 +87,17 @@ function resolveWsUrls() {
     return explicitRaw;
   })();
 
+  if (isSupportHost) {
+    return Array.from(
+      new Set(["wss://tellnab.onrender.com/ws", explicit].filter(Boolean)),
+    );
+  }
+
   return Array.from(
     new Set(
       [
         explicit,
         toWsFromHttp(apiBase),
-        ...(isSupportHost ? ["wss://tellnab.onrender.com/ws"] : []),
         ...(!isSupportHost ? [`${protocol}//${window.location.host}/ws`] : []),
         ...(!isSupportHost
           ? ["wss://tellnab.com/ws", "wss://tellnab.onrender.com/ws"]
@@ -103,6 +108,23 @@ function resolveWsUrls() {
 }
 
 const WS_URLS = resolveWsUrls();
+
+function withSocketAuth(
+  url: string,
+  auth: { token?: string | null; userId?: string; role?: string },
+) {
+  const token = String(auth.token || "").trim();
+  const userId = String(auth.userId || "").trim();
+  const role = String(auth.role || "").trim();
+  if (!token && !userId) return url;
+
+  const params = new URLSearchParams();
+  if (token) params.set("token", token);
+  if (userId) params.set("userId", userId);
+  if (role) params.set("role", role);
+
+  return `${url}${url.includes("?") ? "&" : "?"}${params.toString()}`;
+}
 
 export function SocketProvider({ children }: PropsWithChildren) {
   const [connected, setConnected] = useState(false);
@@ -140,7 +162,12 @@ export function SocketProvider({ children }: PropsWithChildren) {
     }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
-    const wsUrl = WS_URLS[wsUrlIndexRef.current % WS_URLS.length];
+    const wsBaseUrl = WS_URLS[wsUrlIndexRef.current % WS_URLS.length];
+    const wsUrl = withSocketAuth(wsBaseUrl, {
+      token: authToken,
+      userId: authUser.id,
+      role: authUser.role,
+    });
     const ws = new WebSocket(wsUrl);
     (ws as any).__authToken = authToken || "";
     (ws as any).__authUserId = authUser.id;
