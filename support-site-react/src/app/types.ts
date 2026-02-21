@@ -23,10 +23,16 @@ export type TicketRow = {
 
 export type TicketMessage = {
   id: string;
+  ticketId?: string;
   senderId?: string;
   senderRole?: string;
   body: string;
   createdAt: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  pending?: boolean;
 };
 
 export type TicketResponse = {

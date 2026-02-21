@@ -8,6 +8,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { AuthUser, TicketMessage, TicketRow } from "./app/types";
+import { SocketProvider, useSocket } from "./app/SocketContext";
 import {
   clearStoredSupportToken,
   createTicket,
@@ -18,7 +19,8 @@ import {
   listTickets,
   loginSupport,
   patchUserRole,
-  sendTicketMessage,
+  sendTicketMessagePayload,
+  uploadSupportAttachment,
   updateTicket,
 } from "./services/supportApi";
 
@@ -53,33 +55,25 @@ function AppRouter() {
     "MODERATOR",
     "ADMIN",
   ]);
+  const {
+    setAuth,
+    joinTicketRoom,
+    subscribeTicketMessages,
+    emitTicketMessage,
+  } = useSocket();
 
   useEffect(() => {
-    (async () => {
-      const me = await getSessionUser(authToken).catch(() => null);
-      if (me) {
-        setAuthUser(me);
-        if (location.pathname === "/login") {
-          navigate("/dashboard", { replace: true });
-        }
-      }
-    })();
-  }, []);
+    setAuth(authUser, authToken);
+  }, [authUser, authToken, setAuth]);
 
-  const selectedMessages = useMemo(
-    () => messagesByTicket[selectedTicketId] || [],
-    [messagesByTicket, selectedTicketId],
-  );
-
-  async function refreshAll() {
-    if (!authUser) return;
+  async function refreshAllFor(user: AuthUser, token?: string | null) {
     setLoading(true);
     try {
       const [ticketData, rolesData, adminData] = await Promise.all([
-        listTickets(authToken),
-        getRoles(authToken).catch(() => null),
-        String(authUser.role).toUpperCase() === "ADMIN"
-          ? getAdminUsers(authToken).catch(() => null)
+        listTickets(token),
+        getRoles(token).catch(() => null),
+        String(user.role).toUpperCase() === "ADMIN"
+          ? getAdminUsers(token).catch(() => null)
           : Promise.resolve(null),
       ]);
 
@@ -109,6 +103,52 @@ function AppRouter() {
     }
   }
 
+  useEffect(() => {
+    (async () => {
+      const me = await getSessionUser(authToken).catch(() => null);
+      if (me) {
+        setAuthUser(me);
+        await refreshAllFor(me, authToken);
+        if (location.pathname === "/login") {
+          navigate("/dashboard", { replace: true });
+        }
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+    const timer = window.setInterval(() => {
+      refreshAllFor(authUser, authToken);
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, [authUser, authToken]);
+
+  useEffect(() => {
+    if (!selectedTicketId) return;
+    joinTicketRoom(selectedTicketId);
+    const unsubscribe = subscribeTicketMessages(selectedTicketId, (msg) => {
+      setMessagesByTicket((prev) => ({
+        ...prev,
+        [selectedTicketId]: [...(prev[selectedTicketId] || []), msg],
+      }));
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [joinTicketRoom, selectedTicketId, subscribeTicketMessages]);
+
+  const selectedMessages = useMemo(
+    () => messagesByTicket[selectedTicketId] || [],
+    [messagesByTicket, selectedTicketId],
+  );
+
+  async function refreshAll() {
+    if (!authUser) return;
+    await refreshAllFor(authUser, authToken);
+  }
+
   async function handleLogin(email: string, password: string) {
     setLoading(true);
     try {
@@ -122,7 +162,7 @@ function AppRouter() {
       setAuthUser(user);
       setStatus(`Signed in as ${user.name}`);
       navigate("/dashboard", { replace: true });
-      await refreshAll();
+      await refreshAllFor(user, token);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Login failed.");
     } finally {
@@ -140,7 +180,7 @@ function AppRouter() {
       }
       setAuthUser(user);
       navigate("/dashboard", { replace: true });
-      await refreshAll();
+      await refreshAllFor(user, authToken);
     } finally {
       setLoading(false);
     }
@@ -156,14 +196,103 @@ function AppRouter() {
     setStatus("Ticket created.");
   }
 
-  async function handleSendMessage(ticketId: string, text: string) {
-    const res = await sendTicketMessage(ticketId, text, authToken);
-    const msg = res.data;
+  async function handleSendMessage(
+    ticketId: string,
+    payload: { text: string; file?: File | null },
+  ) {
+    const temporaryId = `tmp-${Date.now()}`;
+    const now = new Date().toISOString();
+    const baseMessage: TicketMessage = {
+      id: temporaryId,
+      ticketId,
+      senderId: authUser?.id,
+      senderRole: authUser?.role,
+      body:
+        payload.text ||
+        (payload.file ? `Attachment: ${payload.file.name}` : ""),
+      createdAt: now,
+      pending: true,
+    };
+
+    if (payload.file) {
+      baseMessage.fileName = payload.file.name;
+      baseMessage.fileType = payload.file.type;
+      baseMessage.fileSize = payload.file.size;
+      baseMessage.fileUrl = URL.createObjectURL(payload.file);
+    }
+
     setMessagesByTicket((prev) => ({
       ...prev,
-      [ticketId]: [...(prev[ticketId] || []), msg],
+      [ticketId]: [...(prev[ticketId] || []), baseMessage],
     }));
-    setStatus("Reply sent.");
+
+    try {
+      let attachment:
+        | {
+            fileUrl: string;
+            fileName: string;
+            fileType: string;
+            fileSize: number;
+          }
+        | undefined;
+
+      if (payload.file) {
+        attachment = await uploadSupportAttachment(payload.file, authToken);
+      }
+
+      const response = await sendTicketMessagePayload(
+        ticketId,
+        {
+          body:
+            payload.text ||
+            (attachment ? `Attachment: ${attachment.fileName}` : ""),
+          fileUrl: attachment?.fileUrl,
+          fileName: attachment?.fileName,
+          fileType: attachment?.fileType,
+          fileSize: attachment?.fileSize,
+        },
+        authToken,
+      );
+      const msg = response.data;
+
+      setMessagesByTicket((prev) => ({
+        ...prev,
+        [ticketId]: (prev[ticketId] || []).map((m) =>
+          m.id === temporaryId
+            ? {
+                ...msg,
+                fileUrl: attachment?.fileUrl,
+                fileName: attachment?.fileName,
+                fileType: attachment?.fileType,
+                fileSize: attachment?.fileSize,
+                pending: false,
+              }
+            : m,
+        ),
+      }));
+
+      emitTicketMessage({
+        id: msg.id,
+        ticketId,
+        senderId: msg.senderId,
+        senderRole: msg.senderRole,
+        body: msg.body,
+        createdAt: msg.createdAt,
+        fileUrl: attachment?.fileUrl,
+        fileName: attachment?.fileName,
+        fileType: attachment?.fileType,
+        fileSize: attachment?.fileSize,
+      });
+      setStatus("Reply sent.");
+    } catch (error) {
+      setMessagesByTicket((prev) => ({
+        ...prev,
+        [ticketId]: (prev[ticketId] || []).filter((m) => m.id !== temporaryId),
+      }));
+      setStatus(
+        error instanceof Error ? error.message : "Failed to send message.",
+      );
+    }
   }
 
   async function handleUpdateStatus(ticketId: string, nextStatus: string) {
@@ -241,8 +370,10 @@ function AppRouter() {
 
 export default function SupportApp() {
   return (
-    <BrowserRouter>
-      <AppRouter />
-    </BrowserRouter>
+    <SocketProvider>
+      <BrowserRouter>
+        <AppRouter />
+      </BrowserRouter>
+    </SocketProvider>
   );
 }

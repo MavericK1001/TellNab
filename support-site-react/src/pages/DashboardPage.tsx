@@ -1,5 +1,6 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AuthUser, TicketMessage, TicketRow } from "../app/types";
+import { useSocket } from "../app/SocketContext";
 import { AgentChatWidget } from "../components/agent-chat/AgentChatWidget";
 import { Skeleton } from "../components/common/Skeleton";
 import { StatCard } from "../components/common/StatCard";
@@ -24,7 +25,10 @@ type Props = {
     description: string;
     priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
   }) => Promise<void>;
-  onSendMessage: (ticketId: string, text: string) => Promise<void>;
+  onSendMessage: (
+    ticketId: string,
+    payload: { text: string; file?: File | null },
+  ) => Promise<void>;
   onRefresh: () => Promise<void>;
   onUpdateStatus: (ticketId: string, status: string) => Promise<void>;
   onRoleUpdate: (id: string, role: string) => Promise<void>;
@@ -71,6 +75,36 @@ export function DashboardPage(props: Props) {
   >("MEDIUM");
 
   const [queue, setQueue] = useState<"all" | "assigned" | "unassigned">("all");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState(() => {
+    const raw = window.location.hash.replace("#", "").trim();
+    return raw || "dashboard";
+  });
+  const { connected } = useSocket();
+
+  function navigateToSection(section: string) {
+    setActiveSection(section);
+    window.history.replaceState(null, "", `#${section}`);
+    const id =
+      section === "dashboard"
+        ? "dashboard-stats"
+        : section === "tickets"
+        ? "tickets-section"
+        : section === "conversations"
+        ? "conversations-section"
+        : section === "agents"
+        ? "agents-section"
+        : "role-control-section";
+
+    const node = document.getElementById(id);
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  useEffect(() => {
+    navigateToSection(activeSection);
+  }, []);
 
   const filteredTickets = useMemo(() => {
     if (roleView === "agent") {
@@ -98,7 +132,15 @@ export function DashboardPage(props: Props) {
 
   return (
     <div className="app-shell">
-      <Sidebar user={user} roleView={roleView} onLogout={onLogout} />
+      <Sidebar
+        user={user}
+        roleView={roleView}
+        onLogout={onLogout}
+        activeSection={activeSection}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onNavigate={navigateToSection}
+      />
 
       <main className="app-main">
         <Header
@@ -110,9 +152,11 @@ export function DashboardPage(props: Props) {
               : "Admin Dashboard"
           }
           subtitle="Modern support workspace powered by your existing APIs"
+          connected={connected}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
         />
 
-        <section className="stats-grid">
+        <section id="dashboard-stats" className="stats-grid">
           <StatCard label="Total tickets" value={tickets.length} />
           <StatCard label="Open tickets" value={openCount} />
           <StatCard label="My role" value={user.role} />
@@ -156,7 +200,7 @@ export function DashboardPage(props: Props) {
         ) : null}
 
         <section className="workspace-grid">
-          <section className="panel">
+          <section id="tickets-section" className="panel">
             <div className="list-head">
               <h3>{roleView === "agent" ? "Agent queue" : "Tickets"}</h3>
               <div className="support-btn-row">
@@ -203,7 +247,7 @@ export function DashboardPage(props: Props) {
             )}
           </section>
 
-          <section className="panel">
+          <section id="conversations-section" className="panel">
             <div className="support-btn-row">
               <button
                 className="ghost"
@@ -235,16 +279,27 @@ export function DashboardPage(props: Props) {
               ticket={selected}
               currentUser={user}
               messages={messages}
-              onSend={(text) =>
-                selected ? onSendMessage(selected.id, text) : Promise.resolve()
+              onSend={(payload) =>
+                selected
+                  ? onSendMessage(selected.id, payload)
+                  : Promise.resolve()
               }
               readOnly={!selected}
             />
           </section>
         </section>
 
+        {roleView !== "user" ? (
+          <section id="agents-section" className="panel">
+            <h3>Online agents</h3>
+            <p className="subtle">
+              Use floating internal chat for private messaging.
+            </p>
+          </section>
+        ) : null}
+
         {roleView === "admin" ? (
-          <section className="panel">
+          <section id="role-control-section" className="panel">
             <h3>Role Control</h3>
             <p className="subtle">Dynamic role rendering backed by API</p>
             <div className="admin-role-grid">
@@ -273,7 +328,7 @@ export function DashboardPage(props: Props) {
         {status ? <p className="status-message">{status}</p> : null}
       </main>
 
-      <AgentChatWidget user={user} authToken={authToken} />
+      <AgentChatWidget user={user} />
     </div>
   );
 }

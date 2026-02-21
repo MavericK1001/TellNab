@@ -564,6 +564,11 @@ button:disabled {
   gap: 1rem;
 }
 
+.mobile-close-btn,
+.mobile-menu-btn {
+  display: none;
+}
+
 .sidebar-nav {
   display: grid;
   gap: 0.5rem;
@@ -587,6 +592,40 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.live-status-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.live-avatar {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #1d2744;
+  border: 1px solid var(--border);
+}
+
+.live-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid #0f1628;
+  background: #9099be;
+}
+
+.live-avatar.online .live-dot {
+  background: var(--ok);
+}
+
+.live-avatar.offline .live-dot {
+  background: #8d97bd;
 }
 
 .online-pill {
@@ -724,6 +763,61 @@ button:disabled {
   overflow: auto;
   display: grid;
   gap: 0.5rem;
+}
+
+.chat-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.attach-input-label {
+  position: relative;
+  cursor: pointer;
+}
+
+.attach-input-label input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-preview-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-image-wrap {
+  display: inline-block;
+  margin-top: 0.4rem;
+}
+
+.attachment-image {
+  max-width: min(260px, 100%);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.attachment-file-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem;
+  margin-top: 0.4rem;
+  background: #111a31;
+}
+
+.attachment-name,
+.attachment-meta {
+  margin: 0;
+}
+
+.attachment-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .message-row {
@@ -902,9 +996,71 @@ button:disabled {
   }
 
   .app-sidebar {
-    position: relative;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    top: 0;
+    left: 0;
+    transform: translateX(-102%);
+    transition: transform 0.25s ease;
+    z-index: 70;
+    width: min(320px, 88vw);
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+  }
+
+  .app-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .mobile-close-btn,
+  .mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-close-btn {
+    justify-self: end;
+    background: #1a2447;
+  }
+
+  .mobile-menu-btn {
+    margin-right: 0.5rem;
+    background: #1a2447;
+  }
+
+  .app-header {
+    gap: 0.6rem;
+  }
+
+  .online-pill {
+    font-size: 0.74rem;
+    padding: 0.14rem 0.45rem;
+  }
+
+  .chat-window {
+    padding-bottom: 0;
+  }
+
+  .chat-input {
+    position: sticky;
+    bottom: 0;
+    background: #0f1628;
+    padding: 0.45rem 0;
+  }
+
+  .agent-chat-panel {
+    width: min(94vw, 520px);
+  }
+
+  .agent-chat-body {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .file-preview-name {
+    max-width: 160px;
   }
 }

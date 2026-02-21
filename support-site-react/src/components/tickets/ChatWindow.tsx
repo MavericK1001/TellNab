@@ -6,7 +6,7 @@ type Props = {
   ticket: TicketRow | null;
   currentUser: AuthUser;
   messages: TicketMessage[];
-  onSend: (text: string) => Promise<void>;
+  onSend: (payload: { text: string; file?: File | null }) => Promise<void>;
   readOnly?: boolean;
 };
 
@@ -18,6 +18,8 @@ export function ChatWindow({
   readOnly,
 }: Props) {
   const [draft, setDraft] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [sending, setSending] = useState(false);
   const thread = useMemo(() => {
     if (!ticket) return [];
     const seed: TicketMessage[] = ticket.description
@@ -39,9 +41,12 @@ export function ChatWindow({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!draft.trim() || readOnly) return;
-    await onSend(draft.trim());
+    if ((!draft.trim() && !file) || readOnly) return;
+    setSending(true);
+    await onSend({ text: draft.trim(), file });
+    setSending(false);
     setDraft("");
+    setFile(null);
   }
 
   if (!ticket) {
@@ -69,6 +74,11 @@ export function ChatWindow({
               mine={msg.senderId === currentUser.id}
               body={msg.body}
               timestamp={msg.createdAt}
+              fileUrl={msg.fileUrl}
+              fileName={msg.fileName}
+              fileType={msg.fileType}
+              fileSize={msg.fileSize}
+              pending={msg.pending}
               senderLabel={
                 msg.senderId === currentUser.id
                   ? "You"
@@ -86,12 +96,33 @@ export function ChatWindow({
           onChange={(e) => setDraft(e.target.value)}
           rows={3}
           placeholder={readOnly ? "Read-only" : "Type a message..."}
-          disabled={readOnly}
+          disabled={readOnly || sending}
         />
+
+        <div className="chat-attach-row">
+          <label className="attach-pill attach-input-label">
+            Attach file
+            <input
+              type="file"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              disabled={readOnly || sending}
+            />
+          </label>
+          {file ? (
+            <span className="subtle file-preview-name">{file.name}</span>
+          ) : null}
+          {sending ? <span className="subtle">Uploading...</span> : null}
+        </div>
+
         <div className="chat-actions">
-          <span className="attach-pill">Attach file</span>
-          <button type="submit" disabled={readOnly || !draft.trim()}>
-            Send
+          <span className="attach-pill">
+            {file ? "Attachment ready" : "No attachment"}
+          </span>
+          <button
+            type="submit"
+            disabled={readOnly || sending || (!draft.trim() && !file)}
+          >
+            {sending ? "Sending..." : "Send"}
           </button>
         </div>
       </form>

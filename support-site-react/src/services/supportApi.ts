@@ -213,6 +213,99 @@ export async function sendTicketMessage(id: string, body: string, authToken?: st
   );
 }
 
+export async function sendTicketMessagePayload(
+  id: string,
+  payload: {
+    body: string;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+  },
+  authToken?: string | null,
+) {
+  return apiRequest<{ data: TicketMessage }>(
+    `/tickets/${encodeURIComponent(id)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    authToken || getStoredSupportToken(),
+  );
+}
+
+export async function uploadSupportAttachment(file: File, authToken?: string | null) {
+  const endpointCandidates = Array.from(
+    new Set([
+      ...((window as any).SUPPORT_UPLOAD_ENDPOINT ? [String((window as any).SUPPORT_UPLOAD_ENDPOINT)] : []),
+      "/uploads",
+      "/support/uploads",
+      "/support/attachments",
+    ]),
+  );
+
+  let lastError: unknown = null;
+
+  for (const endpoint of endpointCandidates) {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const bases = Array.from(
+        new Set([...(preferredApiBase ? [preferredApiBase] : []), ...API_BASE_CANDIDATES]),
+      );
+
+      for (const base of bases) {
+        const response = await fetch(`${base}${endpoint}`, {
+          method: "POST",
+          body: formData,
+          headers: {
+            ...(authToken || getStoredSupportToken()
+              ? { Authorization: `Bearer ${authToken || getStoredSupportToken()}` }
+              : {}),
+          },
+          credentials: "include",
+        });
+
+        const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+        const isJson = contentType.includes("application/json");
+        const json = isJson ? await response.json().catch(() => null) : null;
+
+        if (response.ok && json) {
+          const data = (json.data || json) as {
+            fileUrl?: string;
+            url?: string;
+            fileName?: string;
+            name?: string;
+            fileType?: string;
+            type?: string;
+            fileSize?: number;
+            size?: number;
+          };
+
+          const fileUrl = data.fileUrl || data.url;
+          if (!fileUrl) continue;
+
+          return {
+            fileUrl,
+            fileName: data.fileName || data.name || file.name,
+            fileType: data.fileType || data.type || file.type || "application/octet-stream",
+            fileSize: Number(data.fileSize || data.size || file.size || 0),
+          };
+        }
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(
+    lastError instanceof Error
+      ? lastError.message
+      : "Attachment upload failed. Configure SUPPORT_UPLOAD_ENDPOINT to existing upload API.",
+  );
+}
+
 export async function getRoles(authToken?: string | null) {
   return apiRequest<{ data?: Array<{ key: string; name: string }>; roles?: Array<{ key: string; name: string }> }>(
     "/roles",
