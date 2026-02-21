@@ -43,6 +43,14 @@ class TicketRepository {
           customer: { select: { id: true, name: true, email: true } },
           assignedAgent: { select: { id: true, name: true, email: true } },
           tags: { include: { tag: true } },
+          messages: {
+            include: {
+              sender: {
+                select: { id: true, name: true, email: true, role: true },
+              },
+            },
+            orderBy: { createdAt: "asc" },
+          },
         },
         orderBy: { updatedAt: "desc" },
         skip,
@@ -61,6 +69,14 @@ class TicketRepository {
         customer: { select: { id: true, name: true, email: true } },
         assignedAgent: { select: { id: true, name: true, email: true } },
         tags: { include: { tag: true } },
+        messages: {
+          include: {
+            sender: {
+              select: { id: true, name: true, email: true, role: true },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
   }
@@ -95,6 +111,18 @@ class TicketRepository {
 
   async logActivity(data) {
     return this.prisma.ticketActivityLog.create({ data });
+  }
+
+  async listMessages(ticketId) {
+    return this.prisma.ticketMessage.findMany({
+      where: { ticketId },
+      include: {
+        sender: {
+          select: { id: true, name: true, email: true, role: true },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
   }
 }
 

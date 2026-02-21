@@ -44,6 +44,18 @@ function registerTicketRoutes({ router, supportAuthGuard, permissionPolicy, tick
     ticketController.addMessage,
   );
 
+  router.get(
+    "/api/tickets/:id/messages",
+    supportAuthGuard,
+    requireAnyPermission([
+      PERMISSION.TICKET_VIEW_OWN,
+      PERMISSION.TICKET_VIEW_ASSIGNED,
+      PERMISSION.TICKET_VIEW_DEPARTMENT,
+      PERMISSION.TICKET_VIEW_ALL,
+    ]),
+    ticketController.listMessages,
+  );
+
   router.post(
     "/api/tickets/:id/internal-notes",
     supportAuthGuard,

@@ -17,6 +17,7 @@ import {
   getSessionUser,
   getStoredSupportToken,
   listTickets,
+  listTicketMessages,
   loginSupport,
   patchUserRole,
   sendTicketMessagePayload,
@@ -58,6 +59,18 @@ function AppRouter() {
   ]);
   const { setAuth, joinTicketRoom, subscribeTicketMessages } = useSocket();
 
+  function normalizeMessages(items: TicketMessage[]): TicketMessage[] {
+    const deduped = new Map<string, TicketMessage>();
+    (items || []).forEach((item) => {
+      if (!item?.id) return;
+      deduped.set(item.id, item);
+    });
+    return Array.from(deduped.values()).sort(
+      (a, b) =>
+        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
+    );
+  }
+
   useEffect(() => {
     setAuth(authUser, authToken);
   }, [authUser, authToken, setAuth]);
@@ -76,6 +89,15 @@ function AppRouter() {
       const rows = Array.isArray(ticketData?.data) ? ticketData.data : [];
       setTickets(rows);
       setSelectedTicketId((prev) => prev || rows[0]?.id || "");
+      setMessagesByTicket((prev) => {
+        const next = { ...prev };
+        rows.forEach((ticket) => {
+          if (Array.isArray(ticket.messages)) {
+            next[ticket.id] = normalizeMessages(ticket.messages);
+          }
+        });
+        return next;
+      });
 
       if (rolesData) {
         const dynamicRoles = (rolesData.roles || rolesData.data || [])
@@ -141,6 +163,36 @@ function AppRouter() {
       unsubscribers.forEach((unsub) => unsub());
     };
   }, [joinTicketRoom, subscribeTicketMessages, tickets]);
+
+  useEffect(() => {
+    if (!authUser || !selectedTicketId) return;
+
+    let alive = true;
+    const syncMessages = async () => {
+      try {
+        const result = await listTicketMessages(selectedTicketId, authToken);
+        if (!alive) return;
+        const incoming = normalizeMessages(Array.isArray(result?.data) ? result.data : []);
+        setMessagesByTicket((prev) => {
+          const existing = prev[selectedTicketId] || [];
+          const merged = normalizeMessages([...existing, ...incoming]);
+          return { ...prev, [selectedTicketId]: merged };
+        });
+      } catch {
+        // silent fallback: websocket may still be active
+      }
+    };
+
+    void syncMessages();
+    const timer = window.setInterval(() => {
+      void syncMessages();
+    }, 4000);
+
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [authUser, authToken, selectedTicketId]);
 
   const selectedMessages = useMemo(
     () => messagesByTicket[selectedTicketId] || [],

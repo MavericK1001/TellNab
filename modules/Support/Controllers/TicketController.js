@@ -52,6 +52,20 @@ function ticketResource(ticket) {
     department: ticket.department,
     customer: ticket.customer,
     assigned_agent: ticket.assignedAgent,
+    messages: Array.isArray(ticket.messages)
+      ? ticket.messages.map((message) => ({
+          id: message.id,
+          ticketId: message.ticketId,
+          senderId: message.senderId,
+          senderRole: message.senderRole,
+          body: message.body,
+          createdAt: message.createdAt,
+          fileUrl: message.fileUrl || undefined,
+          fileName: message.fileName || undefined,
+          fileType: message.fileType || undefined,
+          fileSize: message.fileSize || undefined,
+        }))
+      : [],
   };
 }
 
@@ -142,6 +156,33 @@ class TicketController {
     }
   };
 
+  listMessages = async (req, res) => {
+    try {
+      const messages = await this.ticketService.listMessages({
+        acl: req.supportAcl,
+        actorId: req.user.id,
+        id: req.params.id,
+      });
+
+      return res.json({
+        data: messages.map((message) => ({
+          id: message.id,
+          ticketId: message.ticketId,
+          senderId: message.senderId,
+          senderRole: message.senderRole,
+          body: message.body,
+          createdAt: message.createdAt,
+          fileUrl: message.fileUrl || undefined,
+          fileName: message.fileName || undefined,
+          fileType: message.fileType || undefined,
+          fileSize: message.fileSize || undefined,
+        })),
+      });
+    } catch (error) {
+      return this.handleError(error, res);
+    }
+  };
+
   addInternalNote = async (req, res) => {
     try {
       const body = internalNoteSchema.parse(req.body || {});
@@ -165,6 +206,12 @@ class TicketController {
     }
     if (error?.message === "support_department_missing") {
       return res.status(503).json({ message: "Support departments are not seeded yet" });
+    }
+    if (error?.code === "ticket_not_found") {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+    if (error?.code === "forbidden") {
+      return res.status(403).json({ message: "Forbidden" });
     }
     return res.status(500).json({ message: "Support module request failed" });
   }

@@ -132,6 +132,35 @@ class TicketService {
     };
   }
 
+  async listMessages({ acl, actorId, id }) {
+    const ticket = await this.ticketRepository.findById(id);
+    if (!ticket || ticket.deletedAt) {
+      const error = new Error("ticket_not_found");
+      error.code = "ticket_not_found";
+      throw error;
+    }
+
+    const canViewAll = acl.hasPermission("ticket.read.all");
+    const canViewDepartment = acl.hasPermission("ticket.read.department");
+    const canViewAssigned = acl.hasPermission("ticket.read.assigned");
+
+    if (!canViewAll && !canViewDepartment) {
+      if (canViewAssigned) {
+        if (String(ticket.assignedAgentId || "") !== String(actorId || "")) {
+          const error = new Error("forbidden");
+          error.code = "forbidden";
+          throw error;
+        }
+      } else if (String(ticket.customerId || "") !== String(actorId || "")) {
+        const error = new Error("forbidden");
+        error.code = "forbidden";
+        throw error;
+      }
+    }
+
+    return this.ticketRepository.listMessages(id);
+  }
+
   async addInternalNote({ actorId, id, note }) {
     const created = await this.ticketRepository.createInternalNote({
       ticketId: id,

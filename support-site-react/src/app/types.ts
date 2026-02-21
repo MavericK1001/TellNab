@@ -19,6 +19,7 @@ export type TicketRow = {
   sla_due_at: string;
   created_at?: string;
   updated_at?: string;
+  messages?: TicketMessage[];
 };
 
 export type TicketMessage = {

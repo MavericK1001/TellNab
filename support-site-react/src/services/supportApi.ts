@@ -253,6 +253,14 @@ export async function sendTicketMessagePayload(
   );
 }
 
+export async function listTicketMessages(id: string, authToken?: string | null) {
+  return apiRequest<{ data: TicketMessage[] }>(
+    `/tickets/${encodeURIComponent(id)}/messages`,
+    undefined,
+    authToken || getStoredSupportToken(),
+  );
+}
+
 export async function uploadSupportAttachment(file: File, authToken?: string | null) {
   const endpointCandidates = Array.from(
     new Set([
