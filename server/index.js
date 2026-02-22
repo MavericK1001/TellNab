@@ -19,6 +19,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
+const nodemailer = require("nodemailer");
 const { WebSocketServer } = require("ws");
 const { z } = require("zod");
 const { PrismaClient } = require("@prisma/client");
@@ -157,6 +158,13 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const SUPPORT_PORTAL_URL = process.env.SUPPORT_PORTAL_URL || "https://support.tellnab.com";
 const SUPPORT_EMAIL_WEBHOOK_URL = process.env.SUPPORT_EMAIL_WEBHOOK_URL || "";
 const SUPPORT_EMAIL_FROM = String(process.env.SUPPORT_EMAIL_FROM || "contact@tellnab.com").trim();
+const SUPPORT_SMTP_HOST = String(process.env.SUPPORT_SMTP_HOST || "").trim();
+const SUPPORT_SMTP_PORT = Number(process.env.SUPPORT_SMTP_PORT || 465);
+const SUPPORT_SMTP_USER = String(process.env.SUPPORT_SMTP_USER || "").trim();
+const SUPPORT_SMTP_PASS = String(process.env.SUPPORT_SMTP_PASS || "").trim();
+const SUPPORT_SMTP_SECURE =
+  String(process.env.SUPPORT_SMTP_SECURE || (SUPPORT_SMTP_PORT === 465 ? "true" : "false")).toLowerCase() ===
+  "true";
 const SUPPORT_SUBDOMAIN = String(process.env.SUPPORT_SUBDOMAIN || "support.tellnab.com").toLowerCase();
 const ENABLE_LEGACY_SUPPORT = String(process.env.ENABLE_LEGACY_SUPPORT || "false").toLowerCase() === "true";
 const AUTH_COOKIE_DOMAIN = String(process.env.AUTH_COOKIE_DOMAIN || "").trim();
@@ -1819,6 +1827,32 @@ function normalizeOptionalText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+let supportSmtpTransporter = null;
+
+function hasSupportSmtpConfig() {
+  return Boolean(SUPPORT_SMTP_HOST && SUPPORT_SMTP_USER && SUPPORT_SMTP_PASS && SUPPORT_SMTP_PORT);
+}
+
+function getSupportSmtpTransporter() {
+  if (!hasSupportSmtpConfig()) {
+    return null;
+  }
+
+  if (!supportSmtpTransporter) {
+    supportSmtpTransporter = nodemailer.createTransport({
+      host: SUPPORT_SMTP_HOST,
+      port: SUPPORT_SMTP_PORT,
+      secure: SUPPORT_SMTP_SECURE,
+      auth: {
+        user: SUPPORT_SMTP_USER,
+        pass: SUPPORT_SMTP_PASS,
+      },
+    });
+  }
+
+  return supportSmtpTransporter;
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -1886,8 +1920,24 @@ async function sendSupportEmailNotification({
   const sender = normalizeOptionalText(from) || "contact@tellnab.com";
   const htmlBody = normalizeOptionalText(html) || buildSupportEmailHtml({ subject, text });
 
+  const smtpTransporter = getSupportSmtpTransporter();
+  if (smtpTransporter) {
+    try {
+      await smtpTransporter.sendMail({
+        from: sender,
+        to: target,
+        subject,
+        text,
+        html: htmlBody,
+      });
+      return;
+    } catch (error) {
+      console.error("[support-email][error] smtp send failed; attempting webhook fallback", error);
+    }
+  }
+
   if (!SUPPORT_EMAIL_WEBHOOK_URL) {
-    console.log("[support-email][skipped] missing SUPPORT_EMAIL_WEBHOOK_URL", {
+    console.log("[support-email][skipped] missing SMTP config and SUPPORT_EMAIL_WEBHOOK_URL", {
       to: target,
       subject,
       meta,
