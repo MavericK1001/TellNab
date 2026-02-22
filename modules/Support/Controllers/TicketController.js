@@ -197,8 +197,18 @@ class TicketController {
                 type: "support_v2_agent_reply",
               },
             });
+          } else {
+            console.warn("[support-email][skipped] customer email missing for support v2 ticket", {
+              ticketId: req.params.id,
+              actorId: req.user.id,
+            });
           }
-        } catch (_error) {
+        } catch (error) {
+          console.error("[support-email][error] support v2 reply notification failed", {
+            ticketId: req.params.id,
+            actorId: req.user.id,
+            message: error?.message || String(error),
+          });
           // email notification is best-effort and must not fail the reply operation
         }
       }

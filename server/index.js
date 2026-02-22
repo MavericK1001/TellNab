@@ -1828,6 +1828,7 @@ function normalizeOptionalText(value) {
 }
 
 let supportSmtpTransporter = null;
+let supportEmailModeLogged = false;
 
 function hasSupportSmtpConfig() {
   return Boolean(SUPPORT_SMTP_HOST && SUPPORT_SMTP_USER && SUPPORT_SMTP_PASS && SUPPORT_SMTP_PORT);
@@ -1919,6 +1920,18 @@ async function sendSupportEmailNotification({
 
   const sender = normalizeOptionalText(from) || "contact@tellnab.com";
   const htmlBody = normalizeOptionalText(html) || buildSupportEmailHtml({ subject, text });
+
+  if (!supportEmailModeLogged) {
+    supportEmailModeLogged = true;
+    console.log("[support-email] transport mode", {
+      smtpEnabled: hasSupportSmtpConfig(),
+      webhookEnabled: Boolean(SUPPORT_EMAIL_WEBHOOK_URL),
+      smtpHost: SUPPORT_SMTP_HOST || null,
+      smtpPort: SUPPORT_SMTP_PORT,
+      smtpSecure: SUPPORT_SMTP_SECURE,
+      from: sender,
+    });
+  }
 
   const smtpTransporter = getSupportSmtpTransporter();
   if (smtpTransporter) {
