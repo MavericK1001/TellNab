@@ -403,12 +403,12 @@ export default function AdviceCenter() {
                 <p className="mt-1 text-sm text-slate-300 line-clamp-2">
                   {item.body}
                 </p>
-                <p className="mt-2 text-xs text-slate-400">
-                  by
-                </p>
+                <p className="mt-2 text-xs text-slate-400">by</p>
                 {item.identityMode === "PUBLIC" ? (
                   <UserIdentityDisplay
-                    displayName={item.author?.displayName || item.author?.name || "Unknown"}
+                    displayName={
+                      item.author?.displayName || item.author?.name || "Unknown"
+                    }
                     roleLabel={item.author?.roleLabel}
                     roleTone={item.author?.roleTone}
                     advisorCategory={item.author?.advisorCategory}
@@ -670,7 +670,11 @@ export default function AdviceCenter() {
 
                   <div className="mt-2">
                     <UserIdentityDisplay
-                      displayName={item.author?.displayName || item.author?.name || "Unknown"}
+                      displayName={
+                        item.author?.displayName ||
+                        item.author?.name ||
+                        "Unknown"
+                      }
                       roleLabel={item.author?.roleLabel}
                       roleTone={item.author?.roleTone}
                       advisorCategory={item.author?.advisorCategory}

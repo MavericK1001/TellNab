@@ -156,6 +156,7 @@ const AI_ASSIST_MODE = String(process.env.AI_ASSIST_MODE || "mock").toLowerCase(
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const SUPPORT_PORTAL_URL = process.env.SUPPORT_PORTAL_URL || "https://support.tellnab.com";
 const SUPPORT_EMAIL_WEBHOOK_URL = process.env.SUPPORT_EMAIL_WEBHOOK_URL || "";
+const SUPPORT_EMAIL_FROM = String(process.env.SUPPORT_EMAIL_FROM || "contact@tellnab.com").trim();
 const SUPPORT_SUBDOMAIN = String(process.env.SUPPORT_SUBDOMAIN || "support.tellnab.com").toLowerCase();
 const ENABLE_LEGACY_SUPPORT = String(process.env.ENABLE_LEGACY_SUPPORT || "false").toLowerCase() === "true";
 const AUTH_COOKIE_DOMAIN = String(process.env.AUTH_COOKIE_DOMAIN || "").trim();
@@ -429,7 +430,13 @@ const realtimeHub = {
 };
 
 if (String(process.env.ENABLE_SUPPORT_V2 || "true").toLowerCase() !== "false") {
-  const supportModuleRouter = createSupportModule({ authRequired, realtimeHub });
+  const supportModuleRouter = createSupportModule({
+    authRequired,
+    realtimeHub,
+    sendSupportEmailNotification,
+    supportPortalUrl: SUPPORT_PORTAL_URL,
+    supportFromEmail: SUPPORT_EMAIL_FROM,
+  });
   const supportApiPrefixes = [
     "/api/tickets",
     "/api/departments",
@@ -1812,11 +1819,13 @@ function normalizeOptionalText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
-async function sendSupportEmailNotification({ to, subject, text, meta = {} }) {
+async function sendSupportEmailNotification({ to, subject, text, from = SUPPORT_EMAIL_FROM, meta = {} }) {
   const target = normalizeOptionalText(to);
   if (!target) {
     return;
   }
+
+  const sender = normalizeOptionalText(from) || "contact@tellnab.com";
 
   if (!SUPPORT_EMAIL_WEBHOOK_URL) {
     console.log("[support-email][skipped] missing SUPPORT_EMAIL_WEBHOOK_URL", {
@@ -1833,6 +1842,7 @@ async function sendSupportEmailNotification({ to, subject, text, meta = {} }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         to: target,
+        from: sender,
         subject,
         text,
         meta,
@@ -3411,11 +3421,11 @@ app.post(
     if (data.notifyByEmail !== false) {
       await sendSupportEmailNotification({
         to: existing.requesterEmail,
-        subject: `TellNab support replied to ticket ${existing.id}`,
+        subject: `TellNab support member replied to ticket ${existing.id}`,
         text: [
           `Hello ${existing.requesterName},`,
           "",
-          "Our support team has replied to your ticket.",
+          `${req.user.name || "A support member"} has replied to your ticket.`,
           `Ticket ID: ${existing.id}`,
           `Subject: ${existing.subject}`,
           "",

@@ -232,12 +232,20 @@ export default function Feed() {
                         {post.author?.avatarUrl ? (
                           <img
                             src={post.author.avatarUrl}
-                            alt={post.author?.displayName || post.author?.name || "Profile"}
+                            alt={
+                              post.author?.displayName ||
+                              post.author?.name ||
+                              "Profile"
+                            }
                             className="mt-0.5 h-6 w-6 rounded-full border border-white/20 object-cover"
                           />
                         ) : null}
                         <UserIdentityDisplay
-                          displayName={post.author?.displayName || post.author?.name || "Unknown"}
+                          displayName={
+                            post.author?.displayName ||
+                            post.author?.name ||
+                            "Unknown"
+                          }
                           roleLabel={post.author?.roleLabel}
                           roleTone={post.author?.roleTone}
                           advisorCategory={post.author?.advisorCategory}

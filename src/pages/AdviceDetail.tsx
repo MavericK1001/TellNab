@@ -407,13 +407,13 @@ export default function AdviceDetail() {
       <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65">
         <h1 className="text-2xl font-bold text-white">{advice.title}</h1>
         <p className="mt-2 text-slate-300">{advice.body}</p>
-        <p className="mt-2 text-xs text-slate-400">
-          by
-        </p>
+        <p className="mt-2 text-xs text-slate-400">by</p>
         {advice.identityMode === "PUBLIC" ? (
           <div className="mt-1">
             <UserIdentityDisplay
-              displayName={advice.author?.displayName || advice.author?.name || "Unknown"}
+              displayName={
+                advice.author?.displayName || advice.author?.name || "Unknown"
+              }
               roleLabel={advice.author?.roleLabel}
               roleTone={advice.author?.roleTone}
               advisorCategory={advice.author?.advisorCategory}

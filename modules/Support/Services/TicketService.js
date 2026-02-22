@@ -132,6 +132,10 @@ class TicketService {
     };
   }
 
+  async getTicketById(id) {
+    return this.ticketRepository.findById(id)
+  }
+
   async listMessages({ acl, actorId, id }) {
     const ticket = await this.ticketRepository.findById(id);
     if (!ticket || ticket.deletedAt) {

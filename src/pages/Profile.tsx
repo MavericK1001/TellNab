@@ -249,7 +249,9 @@ export default function Profile() {
               Helpful answers {profile.helpfulAnswersCount || 0}
             </div>
             <div className="rounded-lg border border-white/10 bg-slate-900/50 p-2 text-xs text-slate-200">
-              Expertise {(profile.expertiseCategories || []).slice(0, 2).join(" • ") || "General"}
+              Expertise{" "}
+              {(profile.expertiseCategories || []).slice(0, 2).join(" • ") ||
+                "General"}
             </div>
           </div>
         </div>
@@ -563,14 +565,18 @@ export default function Profile() {
                   <span
                     key={award.id}
                     className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-100"
-                    title={award.badge?.description || award.badge?.name || "Badge"}
+                    title={
+                      award.badge?.description || award.badge?.name || "Badge"
+                    }
                   >
                     {award.badge?.icon ? `${award.badge.icon} ` : ""}
                     {award.badge?.name || "Badge"}
                   </span>
                 ))}
                 {(profile.badges || []).length === 0 ? (
-                  <span className="text-xs text-slate-400">No earned badges yet.</span>
+                  <span className="text-xs text-slate-400">
+                    No earned badges yet.
+                  </span>
                 ) : null}
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

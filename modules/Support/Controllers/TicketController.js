@@ -70,9 +70,23 @@ function ticketResource(ticket) {
 }
 
 class TicketController {
-  constructor({ ticketService, realtimeHub = null }) {
+  constructor({
+    ticketService,
+    realtimeHub = null,
+    sendSupportEmailNotification = null,
+    supportPortalUrl = "",
+    supportFromEmail = "contact@tellnab.com",
+  }) {
     this.ticketService = ticketService;
     this.realtimeHub = realtimeHub;
+    this.sendSupportEmailNotification = sendSupportEmailNotification;
+    this.supportPortalUrl = supportPortalUrl;
+    this.supportFromEmail = supportFromEmail;
+  }
+
+  isSupportStaffRole(role) {
+    const normalized = String(role || "").toUpperCase();
+    return normalized === "SUPPORT_MEMBER" || normalized === "MODERATOR" || normalized === "ADMIN";
   }
 
   create = async (req, res) => {
@@ -148,6 +162,45 @@ class TicketController {
           fileType: message.fileType,
           fileSize: message.fileSize,
         });
+      }
+
+      if (this.isSupportStaffRole(req.user.role) && this.sendSupportEmailNotification) {
+        try {
+          const ticket = await this.ticketService.getTicketById(req.params.id);
+          const customerEmail = ticket?.customer?.email;
+          const customerName = ticket?.customer?.name || "there";
+          const ticketId = ticket?.ticketNumber || ticket?.id || req.params.id;
+
+          if (customerEmail) {
+            const base = String(this.supportPortalUrl || "").replace(/\/$/, "");
+            const replyLink = base
+              ? `${base}/?view=member&ticketId=${encodeURIComponent(ticket?.id || req.params.id)}&email=${encodeURIComponent(
+                  customerEmail,
+                )}`
+              : "";
+
+            await this.sendSupportEmailNotification({
+              from: this.supportFromEmail || "contact@tellnab.com",
+              to: customerEmail,
+              subject: `TellNab support member replied to ticket ${ticketId}`,
+              text: [
+                `Hello ${customerName},`,
+                "",
+                `${req.user.name || "A support member"} has replied to your support ticket.`,
+                `Ticket: ${ticketId}`,
+                `Subject: ${ticket?.subject || "Support request"}`,
+                ...(replyLink ? ["", `Open your ticket: ${replyLink}`] : []),
+              ].join("\n"),
+              meta: {
+                ticketId: ticket?.id || req.params.id,
+                ticketNumber: ticket?.ticketNumber || null,
+                type: "support_v2_agent_reply",
+              },
+            });
+          }
+        } catch (_error) {
+          // email notification is best-effort and must not fail the reply operation
+        }
       }
 
       return res.status(201).json({ data: message });

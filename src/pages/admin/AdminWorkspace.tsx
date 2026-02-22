@@ -411,9 +411,14 @@ export default function AdminWorkspace() {
       setActionLoading(true);
       setError(null);
       await updateAdminAdvisorProfile(id, { isVerified });
-      toast.success(isVerified ? "Advisor verified." : "Advisor verification removed.");
+      toast.success(
+        isVerified ? "Advisor verified." : "Advisor verification removed.",
+      );
     } catch (err) {
-      const message = parseApiError(err, "Failed to update advisor verification.");
+      const message = parseApiError(
+        err,
+        "Failed to update advisor verification.",
+      );
       setError(message);
       toast.error(message);
     } finally {

@@ -8,14 +8,26 @@ const { TicketRepository } = require("./Repositories/TicketRepository");
 const { TicketService } = require("./Services/TicketService");
 const { TicketController } = require("./Controllers/TicketController");
 
-function createSupportModule({ authRequired, realtimeHub = null }) {
+function createSupportModule({
+  authRequired,
+  realtimeHub = null,
+  sendSupportEmailNotification = null,
+  supportPortalUrl = "",
+  supportFromEmail = "",
+}) {
   const prisma = new PrismaClient();
   const permissionPolicy = createPermissionPolicy({ prisma });
   const supportAuthGuard = createSupportAuthGuard({ authRequired });
   const supportConfig = getSupportConfig();
   const ticketRepository = new TicketRepository({ prisma });
   const ticketService = new TicketService({ prisma, ticketRepository });
-  const ticketController = new TicketController({ ticketService, realtimeHub });
+  const ticketController = new TicketController({
+    ticketService,
+    realtimeHub,
+    sendSupportEmailNotification,
+    supportPortalUrl,
+    supportFromEmail,
+  });
 
   const router = express.Router();
 
