@@ -168,6 +168,7 @@ const SUPPORT_SMTP_SECURE =
 const SUPPORT_SUBDOMAIN = String(process.env.SUPPORT_SUBDOMAIN || "support.tellnab.com").toLowerCase();
 const ENABLE_LEGACY_SUPPORT = String(process.env.ENABLE_LEGACY_SUPPORT || "false").toLowerCase() === "true";
 const AUTH_COOKIE_DOMAIN = String(process.env.AUTH_COOKIE_DOMAIN || "").trim();
+const TRUST_PROXY = String(process.env.TRUST_PROXY || "").trim();
 const FEATURE_PUBLIC_FEED_V2 = String(process.env.FEATURE_PUBLIC_FEED_V2 || "false").toLowerCase() === "true";
 const FEATURE_ADVISOR_PROFILES =
   String(process.env.FEATURE_ADVISOR_PROFILES || "false").toLowerCase() === "true";
@@ -253,6 +254,12 @@ if (normalizedCorsOrigin) {
 }
 
 app.disable("x-powered-by");
+if (TRUST_PROXY) {
+  const trustProxyValue = /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY;
+  app.set("trust proxy", trustProxyValue);
+} else if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 app.use(helmet());
 app.use(
   cors({
@@ -1950,7 +1957,7 @@ async function sendSupportEmailNotification({
   }
 
   if (!SUPPORT_EMAIL_WEBHOOK_URL) {
-    console.log("[support-email][skipped] missing SMTP config and SUPPORT_EMAIL_WEBHOOK_URL", {
+    console.log("[support-email][skipped] SMTP delivery failed and SUPPORT_EMAIL_WEBHOOK_URL fallback is missing", {
       to: target,
       subject,
       meta,
