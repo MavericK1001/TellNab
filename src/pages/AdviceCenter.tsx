@@ -4,6 +4,7 @@ import { isAxiosError } from "axios";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import IdentityModeSelector from "../components/IdentityModeSelector";
+import UserIdentityDisplay from "../components/UserIdentityDisplay";
 import {
   addAdviceComment,
   createAdviceBoostCheckout,
@@ -206,7 +207,14 @@ export default function AdviceCenter() {
       >
         <p className="text-sm text-slate-200">{comment.body}</p>
         <div className="mt-1 flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-400">{comment.author.name}</p>
+          <UserIdentityDisplay
+            displayName={comment.author.displayName || comment.author.name}
+            roleLabel={comment.author.roleLabel}
+            roleTone={comment.author.roleTone}
+            advisorCategory={comment.author.advisorCategory}
+            badges={comment.author.badges}
+            className="max-w-[70%]"
+          />
           {user ? (
             <button
               type="button"
@@ -396,11 +404,19 @@ export default function AdviceCenter() {
                   {item.body}
                 </p>
                 <p className="mt-2 text-xs text-slate-400">
-                  by{" "}
-                  {item.identityMode === "PUBLIC"
-                    ? item.author?.name || "Unknown"
-                    : "Anonymous"}
+                  by
                 </p>
+                {item.identityMode === "PUBLIC" ? (
+                  <UserIdentityDisplay
+                    displayName={item.author?.displayName || item.author?.name || "Unknown"}
+                    roleLabel={item.author?.roleLabel}
+                    roleTone={item.author?.roleTone}
+                    advisorCategory={item.author?.advisorCategory}
+                    badges={item.author?.badges}
+                  />
+                ) : (
+                  <p className="mt-1 text-xs text-slate-300">Anonymous</p>
+                )}
                 <div className="mt-2 text-xs text-violet-300">
                   <Link to={`/advice/${item.id}`}>Open full thread →</Link>
                 </div>
@@ -652,9 +668,15 @@ export default function AdviceCenter() {
                     {item.body}
                   </p>
 
-                  <p className="mt-2 text-[11px] text-slate-400">
-                    by {item.author?.name || "Unknown"}
-                  </p>
+                  <div className="mt-2">
+                    <UserIdentityDisplay
+                      displayName={item.author?.displayName || item.author?.name || "Unknown"}
+                      roleLabel={item.author?.roleLabel}
+                      roleTone={item.author?.roleTone}
+                      advisorCategory={item.author?.advisorCategory}
+                      badges={item.author?.badges}
+                    />
+                  </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <Button

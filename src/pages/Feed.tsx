@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
+import UserIdentityDisplay from "../components/UserIdentityDisplay";
 import { listCategories, listPublicFeed, reactHelpful } from "../services/api";
 import { AdviceItem, CategoryItem } from "../types";
 import { useSeo } from "../utils/seo";
@@ -227,24 +228,26 @@ export default function Feed() {
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs text-slate-400">
                     {post.identityMode === "PUBLIC" ? (
-                      <span className="inline-flex items-center gap-2">
+                      <div className="inline-flex items-start gap-2">
                         {post.author?.avatarUrl ? (
                           <img
                             src={post.author.avatarUrl}
-                            alt={post.author?.name || "Profile"}
-                            className="h-5 w-5 rounded-full border border-white/20 object-cover"
+                            alt={post.author?.displayName || post.author?.name || "Profile"}
+                            className="mt-0.5 h-6 w-6 rounded-full border border-white/20 object-cover"
                           />
                         ) : null}
-                        <span>by {post.author?.name || "Unknown"}</span>
-                      </span>
+                        <UserIdentityDisplay
+                          displayName={post.author?.displayName || post.author?.name || "Unknown"}
+                          roleLabel={post.author?.roleLabel}
+                          roleTone={post.author?.roleTone}
+                          advisorCategory={post.author?.advisorCategory}
+                          badges={post.author?.badges}
+                          className="space-y-1"
+                        />
+                      </div>
                     ) : (
                       <span>by Anonymous</span>
                     )}
-                    {post.author?.advisorProfile?.level ? (
-                      <span className="rounded-full border border-violet-300/25 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-100">
-                        {post.author.advisorProfile.level.replaceAll("_", " ")}
-                      </span>
-                    ) : null}
                     {post.author?.advisorProfile?.isVerified ? (
                       <Link
                         to={`/advisors/${post.author.id}`}
@@ -253,7 +256,8 @@ export default function Feed() {
                         Verified advisor
                       </Link>
                     ) : null}
-                    {Number(post.author?.advisorProfile?.helpfulCount || 0) >= 25 ? (
+                    {Number(post.author?.advisorProfile?.helpfulCount || 0) >=
+                    25 ? (
                       <span className="rounded-full border border-amber-300/25 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
                         Top Contributor
                       </span>

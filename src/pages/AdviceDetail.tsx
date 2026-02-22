@@ -2,6 +2,7 @@ import React, { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import Card from "../components/Card";
 import Button from "../components/Button";
+import UserIdentityDisplay from "../components/UserIdentityDisplay";
 import {
   addAdviceComment,
   convertAdviceToPublic,
@@ -350,7 +351,14 @@ export default function AdviceDetail() {
           <p className="text-sm text-slate-200">{comment.body}</p>
         )}
         <div className="mt-1 flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-400">{comment.author.name}</p>
+          <UserIdentityDisplay
+            displayName={comment.author.displayName || comment.author.name}
+            roleLabel={comment.author.roleLabel}
+            roleTone={comment.author.roleTone}
+            advisorCategory={comment.author.advisorCategory}
+            badges={comment.author.badges}
+            className="max-w-[70%]"
+          />
           {user ? (
             <div className="flex items-center gap-3">
               <button
@@ -400,11 +408,21 @@ export default function AdviceDetail() {
         <h1 className="text-2xl font-bold text-white">{advice.title}</h1>
         <p className="mt-2 text-slate-300">{advice.body}</p>
         <p className="mt-2 text-xs text-slate-400">
-          by{" "}
-          {advice.identityMode === "PUBLIC"
-            ? advice.author?.name || "Unknown"
-            : "Anonymous"}
+          by
         </p>
+        {advice.identityMode === "PUBLIC" ? (
+          <div className="mt-1">
+            <UserIdentityDisplay
+              displayName={advice.author?.displayName || advice.author?.name || "Unknown"}
+              roleLabel={advice.author?.roleLabel}
+              roleTone={advice.author?.roleTone}
+              advisorCategory={advice.author?.advisorCategory}
+              badges={advice.author?.badges}
+            />
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-300">Anonymous</p>
+        )}
         <div className="mt-2 flex flex-wrap gap-2">
           <span
             className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${

@@ -29,6 +29,48 @@ async function main() {
       description: "Manually awarded by admins for outstanding contribution.",
       icon: "🏛️",
     },
+    {
+      key: "VERIFIED_ADVISOR",
+      name: "Verified Advisor",
+      description: "Verified advisor approved by TellNab admins.",
+      icon: "✅",
+    },
+    {
+      key: "MODERATOR",
+      name: "Moderator",
+      description: "Official moderator trust role.",
+      icon: "🛡️",
+    },
+    {
+      key: "ADMIN",
+      name: "Admin",
+      description: "Official platform admin trust role.",
+      icon: "👑",
+    },
+    {
+      key: "TOP_CONTRIBUTOR",
+      name: "Top Contributor",
+      description: "Consistently active advisor with strong contributions.",
+      icon: "🏆",
+    },
+    {
+      key: "MOST_HELPFUL",
+      name: "Most Helpful",
+      description: "Advisor with highly helpful community responses.",
+      icon: "💡",
+    },
+    {
+      key: "HELPFUL_100",
+      name: "100+ Helpful Answers",
+      description: "Received 100+ helpful reactions across public answers.",
+      icon: "💯",
+    },
+    {
+      key: "TRENDING_ADVISOR",
+      name: "Trending Advisor",
+      description: "Advisor with strong recent momentum and engagement.",
+      icon: "📈",
+    },
   ];
   const categories = [
     {

@@ -22,6 +22,8 @@ export type UserProfile = {
   email: string;
   name: string;
   role: UserRole;
+  roleLabel?: string;
+  roleTone?: string;
   authProvider?: "LOCAL" | "GOOGLE" | "APPLE" | string;
   hasPassword?: boolean;
   bio: string;
@@ -34,6 +36,10 @@ export type UserProfile = {
   approvedThreads: number;
   pendingThreads: number;
   badgesCount?: number;
+  badges?: UserBadge[];
+  totalAnswers?: number;
+  helpfulAnswersCount?: number;
+  expertiseCategories?: string[];
   wallet?: {
     paidCents: number;
     earnedCents: number;
@@ -299,7 +305,18 @@ export type AdviceItem = {
   author?: {
     id?: string;
     name: string;
+    displayName?: string;
     role?: UserRole;
+    roleLabel?: string;
+    roleTone?: string;
+    advisorCategory?: string | null;
+    badges?: Array<{
+      key: string;
+      name: string;
+      description?: string;
+      icon?: string;
+      tone?: string;
+    }>;
     avatarUrl?: string | null;
     advisorProfile?: {
       displayName: string;
@@ -386,7 +403,28 @@ export type AdviceComment = {
   author: {
     id: string;
     name: string;
+    displayName?: string;
+    role?: UserRole;
+    roleLabel?: string;
+    roleTone?: string;
+    advisorCategory?: string | null;
+    badges?: Array<{
+      key: string;
+      name: string;
+      description?: string;
+      icon?: string;
+      tone?: string;
+    }>;
+    advisorProfile?: {
+      isVerified?: boolean;
+      level?: string;
+      helpfulCount?: number;
+    } | null;
   };
+};
+
+export type AdminAdvisorUpdateResult = {
+  advisor: AdvisorProfile;
 };
 
 export type PublicFeedResponse = {

@@ -450,8 +450,8 @@ export default function Ask() {
             {showSignupPrompt ? (
               <div className="rounded-2xl border border-violet-300/30 bg-violet-500/15 p-4">
                 <p className="text-sm font-semibold text-violet-100">
-                  Your question is submitted. Create an account to track replies,
-                  save threads, and get notifications.
+                  Your question is submitted. Create an account to track
+                  replies, save threads, and get notifications.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button to="/register">Continue with Signup</Button>

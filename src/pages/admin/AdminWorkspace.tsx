@@ -21,6 +21,7 @@ import {
   moderateAdvice,
   rejectGroupJoinRequest,
   updateAdminCategory,
+  updateAdminAdvisorProfile,
   updateAdminGroup,
   updateAdminSupportTicket,
   updateAdminUserRole,
@@ -402,6 +403,46 @@ export default function AdminWorkspace() {
       const message = parseApiError(err, "Failed to update account status.");
       setError(message);
       toast.error(message);
+    }
+  }
+
+  async function onVerifyAdvisor(id: string, isVerified: boolean) {
+    try {
+      setActionLoading(true);
+      setError(null);
+      await updateAdminAdvisorProfile(id, { isVerified });
+      toast.success(isVerified ? "Advisor verified." : "Advisor verification removed.");
+    } catch (err) {
+      const message = parseApiError(err, "Failed to update advisor verification.");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function onAssignAdvisorCategory(id: string) {
+    const advisorCategory = window.prompt(
+      "Assign advisor category (example: Career Mentor)",
+      "Career Mentor",
+    );
+    if (!advisorCategory || advisorCategory.trim().length < 2) {
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      setError(null);
+      await updateAdminAdvisorProfile(id, {
+        advisorCategory: advisorCategory.trim(),
+      });
+      toast.success("Advisor category assigned.");
+    } catch (err) {
+      const message = parseApiError(err, "Failed to assign advisor category.");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setActionLoading(false);
     }
   }
 
@@ -1430,6 +1471,20 @@ export default function AdminWorkspace() {
                       }
                     >
                       {adminUser.isActive ? "Suspend" : "Activate"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={actionLoading}
+                      onClick={() => void onVerifyAdvisor(adminUser.id, true)}
+                    >
+                      Verify Advisor
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={actionLoading}
+                      onClick={() => void onAssignAdvisorCategory(adminUser.id)}
+                    >
+                      Assign Advisor Category
                     </Button>
                   </div>
                 </div>

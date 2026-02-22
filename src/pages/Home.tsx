@@ -76,7 +76,10 @@ export default function Home() {
           );
         }
 
-        if (answeredRes.status === "fulfilled" && answeredRes.value.items.length) {
+        if (
+          answeredRes.status === "fulfilled" &&
+          answeredRes.value.items.length
+        ) {
           setRecentlyAnswered((prev) =>
             prev.length
               ? prev
@@ -107,11 +110,15 @@ export default function Home() {
   const heroStats = [
     {
       label: "Questions asked",
-      value: overview?.metrics.questionsAsked ?? overview?.metrics.approvedThreads ?? 0,
+      value:
+        overview?.metrics.questionsAsked ??
+        overview?.metrics.approvedThreads ??
+        0,
     },
     {
       label: "Answers given",
-      value: overview?.metrics.answersGiven ?? overview?.metrics.totalComments ?? 0,
+      value:
+        overview?.metrics.answersGiven ?? overview?.metrics.totalComments ?? 0,
     },
     {
       label: "Active advisors",
@@ -139,7 +146,11 @@ export default function Home() {
           <Button to="/ask" className="rounded-xl px-5 py-3">
             Ask for Advice
           </Button>
-          <Button to="/feed" variant="secondary" className="rounded-xl px-5 py-3">
+          <Button
+            to="/feed"
+            variant="secondary"
+            className="rounded-xl px-5 py-3"
+          >
             Give Advice
           </Button>
         </div>
@@ -171,8 +182,12 @@ export default function Home() {
                 to={`/advice/${item.id}`}
                 className="block rounded-xl border border-white/10 bg-slate-950 p-3 hover:border-violet-300/35"
               >
-                <p className="line-clamp-1 text-sm font-semibold text-white">{item.title}</p>
-                <p className="mt-1 text-xs text-slate-300">{item.category?.name || "General"}</p>
+                <p className="line-clamp-1 text-sm font-semibold text-white">
+                  {item.title}
+                </p>
+                <p className="mt-1 text-xs text-slate-300">
+                  {item.category?.name || "General"}
+                </p>
               </Link>
             ))}
           </div>
@@ -202,7 +217,9 @@ export default function Home() {
         </Card>
 
         <Card>
-          <h3 className="text-lg font-semibold text-white">Recently Answered</h3>
+          <h3 className="text-lg font-semibold text-white">
+            Recently Answered
+          </h3>
           <div className="mt-3 space-y-2">
             {recentlyAnswered.slice(0, 5).map((item) => (
               <Link
@@ -210,7 +227,9 @@ export default function Home() {
                 to={`/advice/${item.id}`}
                 className="block rounded-xl border border-white/10 bg-slate-950 p-3 hover:border-emerald-300/35"
               >
-                <p className="line-clamp-1 text-sm font-semibold text-white">{item.title}</p>
+                <p className="line-clamp-1 text-sm font-semibold text-white">
+                  {item.title}
+                </p>
                 <p className="mt-1 text-xs text-emerald-200">
                   Helpful {item.helpfulCount || 0}
                 </p>
@@ -221,14 +240,16 @@ export default function Home() {
       </section>
 
       <section className="grid gap-3 md:grid-cols-3">
-        {["100% Anonymous", "Moderated Advice", "Built for Pakistan"].map((label) => (
-          <div
-            key={label}
-            className="rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/80 to-slate-900/60 p-5 text-center"
-          >
-            <p className="text-base font-semibold text-white">{label}</p>
-          </div>
-        ))}
+        {["100% Anonymous", "Moderated Advice", "Built for Pakistan"].map(
+          (label) => (
+            <div
+              key={label}
+              className="rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/80 to-slate-900/60 p-5 text-center"
+            >
+              <p className="text-base font-semibold text-white">{label}</p>
+            </div>
+          ),
+        )}
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">

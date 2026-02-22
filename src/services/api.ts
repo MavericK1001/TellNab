@@ -4,6 +4,7 @@ import {
   AdminUser,
   AdminAuditLog,
   AdminGroupItem,
+  AdminAdvisorUpdateResult,
   AdminOverview,
   AdviceComment,
   AdviceBoostCheckout,
@@ -291,6 +292,18 @@ export async function updateAdminUserRole(id: string, role: UserRole): Promise<A
 export async function updateAdminUserStatus(id: string, isActive: boolean): Promise<AdminUser> {
   const response = await api.patch<{ user: AdminUser }>(`/admin/users/${id}/status`, { isActive });
   return response.data.user;
+}
+
+export async function updateAdminAdvisorProfile(
+  userId: string,
+  payload: {
+    isVerified?: boolean;
+    advisorCategory?: string;
+    displayName?: string;
+  },
+): Promise<AdminAdvisorUpdateResult> {
+  const response = await api.patch<AdminAdvisorUpdateResult>(`/admin/advisors/${userId}`, payload);
+  return response.data;
 }
 
 export async function getWalletOverview(): Promise<WalletOverview> {

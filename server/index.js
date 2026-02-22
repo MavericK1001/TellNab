@@ -193,6 +193,13 @@ const BADGE_KEYS = {
   FIRST_THREAD: "FIRST_THREAD",
   ACTIVE_ADVISOR: "ACTIVE_ADVISOR",
   COMMUNITY_PILLAR: "COMMUNITY_PILLAR",
+  VERIFIED_ADVISOR: "VERIFIED_ADVISOR",
+  MODERATOR: "MODERATOR",
+  ADMIN: "ADMIN",
+  TOP_CONTRIBUTOR: "TOP_CONTRIBUTOR",
+  MOST_HELPFUL: "MOST_HELPFUL",
+  HELPFUL_100: "HELPFUL_100",
+  TRENDING_ADVISOR: "TRENDING_ADVISOR",
 };
 
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
@@ -508,7 +515,14 @@ function sanitizeAdvice(advice) {
       ? {
           id: isAnonymous ? undefined : advice.author.id,
           name: isAnonymous ? "Anonymous" : advice.author.name,
+          displayName: isAnonymous
+            ? "Anonymous"
+            : advice.author.advisorProfile?.displayName || advice.author.name,
           role: isAnonymous ? undefined : advice.author.role,
+          roleLabel: isAnonymous ? undefined : roleLabelFromUser(advice.author),
+          roleTone: isAnonymous ? undefined : roleToneFromUser(advice.author),
+          advisorCategory: isAnonymous ? null : advisorCategoryFromUser(advice.author),
+          badges: isAnonymous ? [] : normalizeIdentityBadges(advice.author),
           avatarUrl: isAnonymous ? null : advice.author.avatarUrl || null,
           advisorProfile: !isAnonymous && advice.author.advisorProfile
             ? {
@@ -527,7 +541,17 @@ function sanitizeAdvice(advice) {
 }
 
 function adviceAuthorInclude() {
-  return FEATURE_ADVISOR_PROFILES ? { include: { advisorProfile: true } } : true;
+  return {
+    include: {
+      ...(FEATURE_ADVISOR_PROFILES ? { advisorProfile: true } : {}),
+      badges: {
+        where: { isVisible: true },
+        include: { badge: true },
+        orderBy: { awardedAt: "desc" },
+        take: 8,
+      },
+    },
+  };
 }
 
 function sanitizeCategory(category) {
@@ -678,6 +702,58 @@ function sanitizeUserBadge(userBadge) {
   };
 }
 
+function roleLabelFromUser(user) {
+  if (!user) return "Member";
+  if (user.role === ROLES.ADMIN) return "Admin";
+  if (user.role === ROLES.MODERATOR) return "Moderator";
+  if (Boolean(user.advisorProfile?.isVerified)) return "Verified Advisor";
+  if (Number(user.advisorProfile?.helpfulCount || 0) >= 25) return "Top Contributor";
+  return "Member";
+}
+
+function roleToneFromUser(user) {
+  if (!user) return "slate";
+  if (user.role === ROLES.ADMIN) return "rose";
+  if (user.role === ROLES.MODERATOR) return "violet";
+  if (Boolean(user.advisorProfile?.isVerified)) return "emerald";
+  if (Number(user.advisorProfile?.helpfulCount || 0) >= 25) return "amber";
+  return "slate";
+}
+
+function advisorCategoryFromUser(user) {
+  const specialties = parseJsonArray(user?.advisorProfile?.specialties);
+  return specialties.length ? String(specialties[0]) : null;
+}
+
+function normalizeIdentityBadges(user) {
+  const assigned = Array.isArray(user?.badges)
+    ? user.badges
+        .filter((item) => item?.badge?.isActive && item.isVisible !== false)
+        .map((item) => ({
+          key: item.badge.key,
+          name: item.badge.name,
+          description: item.badge.description,
+          icon: item.badge.icon,
+          tone:
+            item.badge.key === BADGE_KEYS.ADMIN
+              ? "rose"
+              : item.badge.key === BADGE_KEYS.MODERATOR
+                ? "violet"
+                : item.badge.key === BADGE_KEYS.VERIFIED_ADVISOR
+                  ? "emerald"
+                  : item.badge.key === BADGE_KEYS.TOP_CONTRIBUTOR
+                    ? "amber"
+                    : "cyan",
+        }))
+    : [];
+
+  const deduped = new Map();
+  assigned.forEach((item) => {
+    deduped.set(item.key, item);
+  });
+  return Array.from(deduped.values());
+}
+
 function sanitizeAuditLog(log) {
   return {
     id: log.id,
@@ -820,10 +896,18 @@ async function awardBadgeIfMissing(tx, { userId, badgeKey, source, reason = null
 }
 
 async function evaluateAutoBadges(userId) {
-  const [threadCount, replyCount] = await Promise.all([
+  const [threadCount, replyCount, helpfulReceivedAgg, profile, user] = await Promise.all([
     prisma.advice.count({ where: { authorId: userId } }),
     prisma.adviceComment.count({ where: { authorId: userId } }),
+    prisma.advice.aggregate({
+      where: { authorId: userId },
+      _sum: { helpfulCount: true },
+    }),
+    FEATURE_ADVISOR_PROFILES ? prisma.advisorProfile.findUnique({ where: { userId } }) : null,
+    prisma.user.findUnique({ where: { id: userId }, select: { role: true } }),
   ]);
+
+  const helpfulReceived = Number(helpfulReceivedAgg?._sum?.helpfulCount || 0);
 
   await prisma.$transaction(async (tx) => {
     if (threadCount >= 1) {
@@ -841,6 +925,73 @@ async function evaluateAutoBadges(userId) {
         badgeKey: BADGE_KEYS.ACTIVE_ADVISOR,
         source: "AUTO",
         reason: "Reached 5 replies",
+      });
+    }
+
+    if (Boolean(profile?.isVerified)) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.VERIFIED_ADVISOR,
+        source: "AUTO",
+        reason: "Advisor profile is verified",
+      });
+    }
+
+    if (user?.role === ROLES.MODERATOR) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.MODERATOR,
+        source: "AUTO",
+        reason: "Moderator trust role",
+      });
+    }
+
+    if (user?.role === ROLES.ADMIN) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.ADMIN,
+        source: "AUTO",
+        reason: "Admin trust role",
+      });
+    }
+
+    if (replyCount >= 25 || helpfulReceived >= 40) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.TOP_CONTRIBUTOR,
+        source: "AUTO",
+        reason: "High contribution activity",
+      });
+    }
+
+    if (helpfulReceived >= 60) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.MOST_HELPFUL,
+        source: "AUTO",
+        reason: "Received consistently helpful reactions",
+      });
+    }
+
+    if (helpfulReceived >= 100) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.HELPFUL_100,
+        source: "AUTO",
+        reason: "Crossed 100+ helpful reactions",
+      });
+    }
+
+    if (
+      Number(profile?.levelScore || 0) >= 130 ||
+      Number(profile?.followersCount || 0) >= 12 ||
+      helpfulReceived >= 80
+    ) {
+      await awardBadgeIfMissing(tx, {
+        userId,
+        badgeKey: BADGE_KEYS.TRENDING_ADVISOR,
+        source: "AUTO",
+        reason: "Strong advisor momentum",
       });
     }
   });
@@ -1827,13 +1978,23 @@ async function buildProfilePayload(userId) {
     return null;
   }
 
-  const [asks, replies, featuredThreads, approvedThreads, pendingThreads, badgeCount] = await Promise.all([
+  const [asks, replies, featuredThreads, approvedThreads, pendingThreads, badgeCount, awards, advisorProfile] = await Promise.all([
     prisma.advice.count({ where: { authorId: userId } }),
     prisma.adviceComment.count({ where: { authorId: userId } }),
     prisma.advice.count({ where: { authorId: userId, isFeatured: true } }),
     prisma.advice.count({ where: { authorId: userId, status: ADVICE_STATUS.APPROVED } }),
     prisma.advice.count({ where: { authorId: userId, status: ADVICE_STATUS.PENDING } }),
     prisma.userBadge.count({ where: { userId, isVisible: true } }),
+    prisma.userBadge.findMany({
+      where: { userId, isVisible: true },
+      include: {
+        badge: true,
+        awardedBy: { select: { id: true, name: true, role: true } },
+      },
+      orderBy: { awardedAt: "desc" },
+      take: 20,
+    }),
+    FEATURE_ADVISOR_PROFILES ? prisma.advisorProfile.findUnique({ where: { userId } }) : null,
   ]);
 
   const roleLabel =
@@ -1841,13 +2002,30 @@ async function buildProfilePayload(userId) {
       ? "Admin"
       : user.role === ROLES.MODERATOR
         ? "Moderator"
-        : "Member";
+        : advisorProfile?.isVerified
+          ? "Verified Advisor"
+          : "Member";
+
+  const roleTone =
+    user.role === ROLES.ADMIN
+      ? "rose"
+      : user.role === ROLES.MODERATOR
+        ? "violet"
+        : advisorProfile?.isVerified
+          ? "emerald"
+          : "slate";
+
+  const expertiseCategories = Array.from(
+    new Set(parseJsonArray(advisorProfile?.specialties || "[]").map((item) => String(item).trim()).filter(Boolean)),
+  );
 
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
+    roleLabel,
+    roleTone,
     authProvider: user.authProvider || "LOCAL",
     hasPassword: user.hasPassword !== false,
     bio:
@@ -1860,12 +2038,16 @@ async function buildProfilePayload(userId) {
     featuredThreads,
     approvedThreads,
     pendingThreads,
+    totalAnswers: replies,
+    helpfulAnswersCount: Number(advisorProfile?.helpfulCount || 0),
+    expertiseCategories,
     wallet: {
       paidCents: user.walletPaidCents,
       earnedCents: user.walletEarnedCents,
       lifetimeEarnedCents: user.walletLifetimeEarnedCents,
     },
     badgesCount: badgeCount,
+    badges: awards.map(sanitizeUserBadge),
   };
 }
 
@@ -2093,6 +2275,20 @@ const adminBadgeAssignSchema = z.object({
   badgeKey: z.string().min(2).max(80),
   reason: z.string().min(10).max(240),
 });
+
+const adminAdvisorUpdateSchema = z
+  .object({
+    isVerified: z.boolean().optional(),
+    advisorCategory: z.string().min(2).max(80).optional(),
+    displayName: z.string().min(2).max(80).optional(),
+  })
+  .refine(
+    (value) =>
+      value.isVerified !== undefined ||
+      value.advisorCategory !== undefined ||
+      value.displayName !== undefined,
+    { message: "At least one advisor field is required" },
+  );
 
 const adminCategoryCreateSchema = z.object({
   name: z.string().min(2).max(80),
@@ -4310,6 +4506,8 @@ app.patch("/api/admin/users/:id/role", authRequired, adminRequired, async (req, 
       data: { role },
     });
 
+    await evaluateAutoBadges(id);
+
     return res.json({ user: sanitizeUser(user) });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -4377,6 +4575,52 @@ app.patch("/api/admin/users/:id/status", authRequired, adminRequired, async (req
       return res.status(400).json({ message: "Invalid input", issues: error.issues });
     }
     return res.status(404).json({ message: "User not found" });
+  }
+});
+
+app.patch("/api/admin/advisors/:userId", authRequired, adminRequired, async (req, res) => {
+  try {
+    const data = adminAdvisorUpdateSchema.parse(req.body || {});
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const current = await prisma.advisorProfile.findUnique({ where: { userId: req.params.userId } });
+    const currentSpecialties = parseJsonArray(current?.specialties || "[]").map((item) => String(item));
+    const normalizedCategory = data.advisorCategory ? normalizeText(data.advisorCategory, 80) : undefined;
+    const mergedSpecialties =
+      normalizedCategory !== undefined
+        ? Array.from(new Set([normalizedCategory, ...currentSpecialties])).slice(0, 10)
+        : currentSpecialties;
+
+    const profile = await prisma.advisorProfile.upsert({
+      where: { userId: req.params.userId },
+      create: {
+        userId: req.params.userId,
+        displayName: data.displayName || target.name,
+        isVerified: Boolean(data.isVerified),
+        specialties: JSON.stringify(mergedSpecialties),
+      },
+      update: {
+        ...(data.displayName ? { displayName: data.displayName } : {}),
+        ...(data.isVerified !== undefined ? { isVerified: data.isVerified } : {}),
+        ...(normalizedCategory !== undefined ? { specialties: JSON.stringify(mergedSpecialties) } : {}),
+      },
+      include: {
+        user: { select: { id: true, name: true, role: true } },
+      },
+    });
+
+    await evaluateAutoBadges(req.params.userId);
+
+    return res.json({ advisor: sanitizeAdvisorProfile(profile, { isFollowing: false }) });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid input", issues: error.issues });
+    }
+    return res.status(500).json({ message: "Failed to update advisor profile" });
   }
 });
 
@@ -6155,7 +6399,19 @@ app.get("/api/advice/:id", async (req, res) => {
       category: true,
       group: true,
       comments: {
-        include: { author: true },
+        include: {
+          author: {
+            include: {
+              ...(FEATURE_ADVISOR_PROFILES ? { advisorProfile: true } : {}),
+              badges: {
+                where: { isVisible: true },
+                include: { badge: true },
+                orderBy: { awardedAt: "desc" },
+                take: 8,
+              },
+            },
+          },
+        },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -6212,7 +6468,23 @@ app.get("/api/advice/:id", async (req, res) => {
       transcript: comment.transcript || null,
       parentId: comment.parentId,
       createdAt: comment.createdAt,
-      author: { id: comment.author.id, name: comment.author.name },
+      author: {
+        id: comment.author.id,
+        name: comment.author.name,
+        displayName: comment.author.advisorProfile?.displayName || comment.author.name,
+        role: comment.author.role,
+        roleLabel: roleLabelFromUser(comment.author),
+        roleTone: roleToneFromUser(comment.author),
+        advisorCategory: advisorCategoryFromUser(comment.author),
+        badges: normalizeIdentityBadges(comment.author),
+        advisorProfile: comment.author.advisorProfile
+          ? {
+              isVerified: Boolean(comment.author.advisorProfile.isVerified),
+              level: String(comment.author.advisorProfile.level || "NEW"),
+              helpfulCount: Number(comment.author.advisorProfile.helpfulCount || 0),
+            }
+          : null,
+      },
     })),
   });
 });
@@ -6418,7 +6690,19 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
             }
           : {}),
       },
-      include: { author: true },
+      include: {
+        author: {
+          include: {
+            ...(FEATURE_ADVISOR_PROFILES ? { advisorProfile: true } : {}),
+            badges: {
+              where: { isVisible: true },
+              include: { badge: true },
+              orderBy: { awardedAt: "desc" },
+              take: 8,
+            },
+          },
+        },
+      },
     });
 
     await evaluateAutoBadges(req.user.id);
@@ -6504,7 +6788,23 @@ app.post("/api/advice/:id/comments", authRequired, async (req, res) => {
         transcript: comment.transcript || null,
         parentId: comment.parentId,
         createdAt: comment.createdAt,
-        author: { id: comment.author.id, name: comment.author.name },
+        author: {
+          id: comment.author.id,
+          name: comment.author.name,
+          displayName: comment.author.advisorProfile?.displayName || comment.author.name,
+          role: comment.author.role,
+          roleLabel: roleLabelFromUser(comment.author),
+          roleTone: roleToneFromUser(comment.author),
+          advisorCategory: advisorCategoryFromUser(comment.author),
+          badges: normalizeIdentityBadges(comment.author),
+          advisorProfile: comment.author.advisorProfile
+            ? {
+                isVerified: Boolean(comment.author.advisorProfile.isVerified),
+                level: String(comment.author.advisorProfile.level || "NEW"),
+                helpfulCount: Number(comment.author.advisorProfile.helpfulCount || 0),
+              }
+            : null,
+        },
       },
     });
   } catch (error) {

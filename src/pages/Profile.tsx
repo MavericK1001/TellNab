@@ -2,6 +2,7 @@ import React, { ChangeEvent, useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
 import Button from "../components/Button";
+import UserIdentityDisplay from "../components/UserIdentityDisplay";
 import {
   getDashboardSummary,
   getMyBadges,
@@ -42,6 +43,8 @@ export default function Profile() {
     savedAdvice: number;
     followedAdvisors: number;
     activityScore: number;
+    anonymousQuestions?: number;
+    publicQuestions?: number;
   } | null>(null);
   const [badges, setBadges] = useState<BadgeDefinition[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -225,6 +228,31 @@ export default function Profile() {
           title="Profile settings"
           subtitle="Manage your identity, security, and personalized profile controls."
         />
+        <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/55 p-4">
+          <UserIdentityDisplay
+            displayName={profile.name}
+            roleLabel={profile.roleLabel || profile.role}
+            roleTone={profile.roleTone}
+            advisorCategory={profile.expertiseCategories?.[0] || null}
+            badges={(profile.badges || []).map((item) => ({
+              key: item.badge?.key || item.id,
+              name: item.badge?.name || "Badge",
+              description: item.badge?.description,
+              icon: item.badge?.icon,
+            }))}
+          />
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-white/10 bg-slate-900/50 p-2 text-xs text-slate-200">
+              Total answers {profile.totalAnswers || profile.replies || 0}
+            </div>
+            <div className="rounded-lg border border-white/10 bg-slate-900/50 p-2 text-xs text-slate-200">
+              Helpful answers {profile.helpfulAnswersCount || 0}
+            </div>
+            <div className="rounded-lg border border-white/10 bg-slate-900/50 p-2 text-xs text-slate-200">
+              Expertise {(profile.expertiseCategories || []).slice(0, 2).join(" • ") || "General"}
+            </div>
+          </div>
+        </div>
         {dashboardStats ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
             <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
@@ -530,6 +558,21 @@ export default function Profile() {
               <p className="mt-1 text-sm text-slate-400">
                 All badges are visible. Earned badges are highlighted.
               </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(profile.badges || []).map((award) => (
+                  <span
+                    key={award.id}
+                    className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-100"
+                    title={award.badge?.description || award.badge?.name || "Badge"}
+                  >
+                    {award.badge?.icon ? `${award.badge.icon} ` : ""}
+                    {award.badge?.name || "Badge"}
+                  </span>
+                ))}
+                {(profile.badges || []).length === 0 ? (
+                  <span className="text-xs text-slate-400">No earned badges yet.</span>
+                ) : null}
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {badges.map((badge) => (
                   <div
