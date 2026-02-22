@@ -1819,13 +1819,72 @@ function normalizeOptionalText(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
-async function sendSupportEmailNotification({ to, subject, text, from = SUPPORT_EMAIL_FROM, meta = {} }) {
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildSupportEmailHtml({ subject, text }) {
+  const safeSubject = escapeHtml(subject || "TellNab Support Update");
+  const safeText = escapeHtml(text || "You have a new support update.");
+  const textHtml = safeText
+    .split("\n\n")
+    .map((chunk) => `<p style=\"margin:0 0 12px;color:#1f2937;line-height:1.6;font-size:14px;\">${chunk.replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;">
+            <tr>
+              <td style="padding:18px 22px;background:linear-gradient(135deg,#0f172a,#1e293b);color:#f8fafc;">
+                <div style="font-size:18px;font-weight:700;letter-spacing:0.2px;">TellNab Support</div>
+                <div style="font-size:12px;opacity:.86;margin-top:4px;">Your safe place for support and advice</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 22px 6px;">
+                <h1 style="margin:0 0 12px;font-size:18px;color:#0f172a;line-height:1.35;">${safeSubject}</h1>
+                ${textHtml}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 22px 20px;color:#6b7280;font-size:12px;line-height:1.5;">
+                If you need help, reply through your support portal or contact us at ${escapeHtml(
+                  SUPPORT_EMAIL_FROM || "contact@tellnab.com",
+                )}.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+async function sendSupportEmailNotification({
+  to,
+  subject,
+  text,
+  html,
+  from = SUPPORT_EMAIL_FROM,
+  meta = {},
+}) {
   const target = normalizeOptionalText(to);
   if (!target) {
     return;
   }
 
   const sender = normalizeOptionalText(from) || "contact@tellnab.com";
+  const htmlBody = normalizeOptionalText(html) || buildSupportEmailHtml({ subject, text });
 
   if (!SUPPORT_EMAIL_WEBHOOK_URL) {
     console.log("[support-email][skipped] missing SUPPORT_EMAIL_WEBHOOK_URL", {
@@ -1845,6 +1904,7 @@ async function sendSupportEmailNotification({ to, subject, text, from = SUPPORT_
         from: sender,
         subject,
         text,
+        html: htmlBody,
         meta,
       }),
     });
