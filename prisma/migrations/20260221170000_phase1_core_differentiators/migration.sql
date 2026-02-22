@@ -4,6 +4,7 @@
 ALTER TABLE "Advice" ADD COLUMN "tags" TEXT;
 ALTER TABLE "Advice" ADD COLUMN "targetAudience" TEXT;
 ALTER TABLE "Advice" ADD COLUMN "isUrgent" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Advice" ADD COLUMN "identityMode" TEXT NOT NULL DEFAULT 'ANONYMOUS';
 
 ALTER TABLE "AdvisorProfile" ADD COLUMN "helpfulCount" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "AdvisorProfile" ADD COLUMN "level" TEXT NOT NULL DEFAULT 'NEW';
@@ -31,3 +32,4 @@ CREATE INDEX "AdviceAdvisorMatch_advisorId_createdAt_idx" ON "AdviceAdvisorMatch
 CREATE INDEX "AdviceAdvisorMatch_expiresAt_idx" ON "AdviceAdvisorMatch"("expiresAt");
 CREATE INDEX "Advice_isUrgent_createdAt_idx" ON "Advice"("isUrgent", "createdAt");
 CREATE INDEX "Advice_isUrgent_status_idx" ON "Advice"("isUrgent", "status");
+CREATE INDEX "Advice_identityMode_createdAt_idx" ON "Advice"("identityMode", "createdAt");

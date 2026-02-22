@@ -1,6 +1,8 @@
 import React, { FormEvent, useState } from "react";
 import { isAxiosError } from "axios";
+import { useLocation } from "react-router-dom";
 import Button from "../components/Button";
+import IdentityModeSelector from "../components/IdentityModeSelector";
 import {
   createAdvice,
   generateAdviceDraftWithAi,
@@ -23,6 +25,7 @@ function parseApiError(error: unknown, fallback: string): string {
 }
 
 export default function Ask() {
+  const location = useLocation();
   const phaseUrgentMode =
     String(import.meta.env.VITE_PHASE1_URGENT_MODE || "false").toLowerCase() ===
     "true";
@@ -37,7 +40,9 @@ export default function Ask() {
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [title, setTitle] = useState("");
   const [question, setQuestion] = useState("");
-  const [anonymous, setAnonymous] = useState(true);
+  const [identityMode, setIdentityMode] = useState<"ANONYMOUS" | "PUBLIC">(
+    "ANONYMOUS",
+  );
   const [categoryId, setCategoryId] = useState("");
   const [targetTone, setTargetTone] = useState<
     "balanced" | "direct" | "empathetic"
@@ -56,6 +61,14 @@ export default function Ask() {
       })
       .catch(() => setCategories([]));
   }, []);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(location.search || "");
+    const identity = String(params.get("identity") || "").toUpperCase();
+    if (identity === "PUBLIC") {
+      setIdentityMode("PUBLIC");
+    }
+  }, [location.search]);
 
   useSeo({
     title: "Ask for Advice - Post Your Dilemma | TellNab",
@@ -79,8 +92,9 @@ export default function Ask() {
 
       await createAdvice({
         title,
-        body: `[Anonymous: ${anonymous ? "Yes" : "No"}]\n\n${question}`,
+        body: question,
         categoryId: categoryId || undefined,
+        identityMode,
         ...(phaseSmartMatching
           ? {
               tags,
@@ -94,7 +108,7 @@ export default function Ask() {
       );
       setTitle("");
       setQuestion("");
-      setAnonymous(true);
+      setIdentityMode("ANONYMOUS");
       setIsUrgent(false);
       setTagsInput("");
       setTargetAudience("");
@@ -130,7 +144,7 @@ export default function Ask() {
         title,
         question,
         targetTone,
-        anonymous,
+        anonymous: identityMode === "ANONYMOUS",
       });
 
       setTitle(result.draftTitle || title);
@@ -154,8 +168,13 @@ export default function Ask() {
       <section className="lg:col-span-2">
         <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/80 to-slate-900/60 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
           <h2 className="mb-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            Ask for unfiltered advice
+            Ask for advice your way — anonymously or publicly.
           </h2>
+          <IdentityModeSelector
+            value={identityMode}
+            onChange={setIdentityMode}
+          />
+
           <p className="mb-6 text-sm leading-6 text-slate-300">
             Write clearly, keep it short, and include enough context for better
             responses.
@@ -332,18 +351,7 @@ export default function Ask() {
               ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-20 md:pb-0">
-              <label className="inline-flex items-center gap-2 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  name="anonymous"
-                  checked={anonymous}
-                  onChange={(event) => setAnonymous(event.target.checked)}
-                  className="h-4 w-4 rounded border-white/20 bg-slate-950"
-                />
-                Post anonymously
-              </label>
-
+            <div className="flex flex-wrap items-center justify-end gap-3 pb-20 md:pb-0">
               <div className="flex items-center gap-2">
                 <Button type="button" variant="secondary">
                   Preview

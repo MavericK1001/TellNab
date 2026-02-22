@@ -48,7 +48,9 @@ export default function QuestionShare() {
     <div className="mx-auto max-w-2xl space-y-4">
       <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65">
         <p className="text-xs font-semibold uppercase tracking-wide text-violet-200">
-          Anonymous TellNab Question
+          {question.identityMode === "PUBLIC"
+            ? "Public TellNab Question"
+            : "Anonymous TellNab Question"}
         </p>
         <h1 className="mt-2 text-2xl font-bold text-white">{question.title}</h1>
         {question.isUrgent ? (
@@ -57,6 +59,9 @@ export default function QuestionShare() {
           </span>
         ) : null}
         <p className="mt-3 text-sm text-slate-300">{question.body}</p>
+        {question.identityMode === "PUBLIC" && question.author?.name ? (
+          <p className="mt-2 text-xs text-slate-400">by {question.author.name}</p>
+        ) : null}
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
           {question.category?.name ? (
             <span className="rounded-full border border-cyan-300/25 bg-cyan-500/10 px-2.5 py-1">

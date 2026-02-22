@@ -180,6 +180,15 @@ export default function Feed() {
                         Boosted
                       </span>
                     ) : null}
+                    {post.identityMode === "ANONYMOUS" || post.isAnonymous ? (
+                      <span className="rounded-full border border-slate-300/25 bg-slate-500/10 px-2.5 py-1 text-[11px] font-semibold text-slate-200">
+                        Anonymous
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-cyan-300/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100">
+                        Public
+                      </span>
+                    )}
                     {post.isUrgent ? (
                       <span className="rounded-full border border-rose-300/35 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-100">
                         Urgent
@@ -211,7 +220,20 @@ export default function Feed() {
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <span>by {post.author?.name || "Unknown"}</span>
+                    {post.identityMode === "PUBLIC" ? (
+                      <span className="inline-flex items-center gap-2">
+                        {post.author?.avatarUrl ? (
+                          <img
+                            src={post.author.avatarUrl}
+                            alt={post.author?.name || "Profile"}
+                            className="h-5 w-5 rounded-full border border-white/20 object-cover"
+                          />
+                        ) : null}
+                        <span>by {post.author?.name || "Unknown"}</span>
+                      </span>
+                    ) : (
+                      <span>by Anonymous</span>
+                    )}
                     {post.author?.advisorProfile?.level ? (
                       <span className="rounded-full border border-violet-300/25 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-100">
                         {post.author.advisorProfile.level.replaceAll("_", " ")}

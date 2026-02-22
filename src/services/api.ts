@@ -444,6 +444,7 @@ export async function createAdvice(payload: {
   body: string;
   categoryId?: string;
   groupId?: string;
+  identityMode?: "ANONYMOUS" | "PUBLIC";
   tags?: string[];
   targetAudience?: string;
   isUrgent?: boolean;
@@ -791,6 +792,13 @@ export async function listAdvisors(options?: {
   return response.data;
 }
 
+export async function listAdvisorLeaderboard(limit = 20): Promise<AdvisorProfile[]> {
+  const response = await api.get<{ items: AdvisorProfile[] }>("/advisors/leaderboard", {
+    params: { limit },
+  });
+  return response.data.items;
+}
+
 export async function getAdvisorProfile(userId: string): Promise<AdvisorProfile> {
   const response = await api.get<{ advisor: AdvisorProfile }>(`/advisors/${userId}`);
   return response.data.advisor;
@@ -809,6 +817,13 @@ export async function unfollowAdvisor(userId: string): Promise<{ success: boolea
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await api.get<DashboardSummary>("/dashboard/summary");
   return response.data;
+}
+
+export async function convertAdviceToPublic(adviceId: string): Promise<AdviceItem> {
+  const response = await api.patch<{ advice: AdviceItem }>(`/advice/${adviceId}/identity`, {
+    identityMode: "PUBLIC",
+  });
+  return response.data.advice;
 }
 
 export async function deleteMyAdviceComment(

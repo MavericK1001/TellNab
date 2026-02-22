@@ -250,6 +250,8 @@ export type AdviceItem = {
   title: string;
   body: string;
   status: AdviceStatus;
+  identityMode?: "ANONYMOUS" | "PUBLIC" | string;
+  isAnonymous?: boolean;
   visibility?: "PUBLIC" | "PRIVATE" | string;
   isLocked: boolean;
   isFeatured: boolean;
@@ -269,6 +271,7 @@ export type AdviceItem = {
   holdReason?: string | null;
   followCount?: number;
   isFollowing?: boolean;
+  isOwner?: boolean;
   createdAt: string;
   updatedAt: string;
   category?: {
@@ -283,9 +286,10 @@ export type AdviceItem = {
     visibility: "PUBLIC" | "PRIVATE" | string;
   } | null;
   author?: {
-    id: string;
+    id?: string;
     name: string;
     role?: UserRole;
+    avatarUrl?: string | null;
     advisorProfile?: {
       displayName: string;
       isVerified: boolean;
@@ -405,6 +409,8 @@ export type AdvisorProfile = {
     | "ELITE_ADVISOR"
     | string;
   levelScore?: number;
+  adviceGiven?: number;
+  expertiseCategories?: string[];
   followersCount: number;
   isFollowing: boolean;
   user?: {
@@ -419,6 +425,8 @@ export type PublicQuestionShare = {
     id: string;
     title: string;
     body: string;
+    identityMode?: "ANONYMOUS" | "PUBLIC" | string;
+    author?: { name: string } | null;
     category?: { id: string; name: string } | null;
     replyCount: number;
     createdAt: string;
@@ -439,6 +447,8 @@ export type DashboardSummary = {
     savedAdvice: number;
     followedAdvisors: number;
     activityScore: number;
+    anonymousQuestions?: number;
+    publicQuestions?: number;
   };
 };
 

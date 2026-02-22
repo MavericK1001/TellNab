@@ -4,6 +4,7 @@ import Card from "../components/Card";
 import Button from "../components/Button";
 import {
   addAdviceComment,
+  convertAdviceToPublic,
   createAdviceBoostCheckout,
   deleteAdviceCommentAsModerator,
   deleteMyAdviceComment,
@@ -42,6 +43,7 @@ export default function AdviceDetail() {
   const [boostPending, setBoostPending] = useState(false);
   const [boostMessage, setBoostMessage] = useState<string | null>(null);
   const [moderationPending, setModerationPending] = useState(false);
+  const [convertingIdentity, setConvertingIdentity] = useState(false);
   const [moderationMessage, setModerationMessage] = useState<string | null>(
     null,
   );
@@ -134,6 +136,20 @@ export default function AdviceDetail() {
     const absoluteUrl = `${window.location.origin}${shareMeta.shareUrl}`;
     await navigator.clipboard.writeText(absoluteUrl);
     setModerationMessage("Share link copied.");
+  }
+
+  async function onConvertToPublic() {
+    if (!id || !advice) return;
+    try {
+      setConvertingIdentity(true);
+      const updated = await convertAdviceToPublic(id);
+      setAdvice(updated);
+      setModerationMessage("Post converted to public profile.");
+    } catch {
+      setModerationMessage("Unable to convert post identity.");
+    } finally {
+      setConvertingIdentity(false);
+    }
   }
 
   useEffect(() => {
@@ -384,9 +400,18 @@ export default function AdviceDetail() {
         <h1 className="text-2xl font-bold text-white">{advice.title}</h1>
         <p className="mt-2 text-slate-300">{advice.body}</p>
         <p className="mt-2 text-xs text-slate-400">
-          by {advice.author?.name || "Unknown"}
+          by {advice.identityMode === "PUBLIC" ? advice.author?.name || "Unknown" : "Anonymous"}
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
+          <span
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+              advice.identityMode === "PUBLIC"
+                ? "border-cyan-300/30 bg-cyan-500/15 text-cyan-100"
+                : "border-slate-300/30 bg-slate-500/10 text-slate-200"
+            }`}
+          >
+            {advice.identityMode === "PUBLIC" ? "Public" : "Anonymous"}
+          </span>
           {advice.isUrgent ? (
             <span className="rounded-full border border-rose-300/35 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-100">
               Urgent
@@ -458,8 +483,20 @@ export default function AdviceDetail() {
             .
           </p>
         ) : null}
-        {user && advice.author?.id === user.id ? (
+        {user && advice.isOwner ? (
           <div className="mt-3">
+            {advice.identityMode !== "PUBLIC" ? (
+              <button
+                type="button"
+                disabled={convertingIdentity}
+                onClick={() => void onConvertToPublic()}
+                className={`mr-2 rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 ${
+                  convertingIdentity ? "opacity-70" : ""
+                }`}
+              >
+                {convertingIdentity ? "Converting..." : "Convert to public"}
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={boostPending || advice.isBoostActive || advice.isLocked}

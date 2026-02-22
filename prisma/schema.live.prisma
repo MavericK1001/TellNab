@@ -323,6 +323,7 @@ model Advice {
   title       String
   body        String
   status      String   @default("PENDING")
+  identityMode String  @default("ANONYMOUS")
   visibility  String   @default("PUBLIC")
   isLocked    Boolean  @default(false)
   isFeatured  Boolean  @default(false)
@@ -366,6 +367,7 @@ model Advice {
   matchedAdvisors AdviceAdvisorMatch[]
 
   @@index([status, visibility, createdAt])
+  @@index([identityMode, createdAt])
   @@index([status, categoryId, createdAt])
   @@index([priorityTier, createdAt])
 }

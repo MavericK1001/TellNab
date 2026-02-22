@@ -113,6 +113,12 @@ export default function AdvisorProfile() {
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+            <p className="text-xs text-slate-400">Advice given</p>
+            <p className="text-lg font-semibold text-white">
+              {advisor.adviceGiven || 0}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
             <p className="text-xs text-slate-400">Helpful</p>
             <p className="text-lg font-semibold text-white">
               {advisor.helpfulCount || 0}
@@ -142,6 +148,24 @@ export default function AdvisorProfile() {
                 {item}
               </span>
             ))}
+          </div>
+        ) : null}
+
+        {advisor.expertiseCategories?.length ? (
+          <div className="mt-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">
+              Expertise categories
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {advisor.expertiseCategories.map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-violet-300/25 bg-violet-500/10 px-2.5 py-1 text-xs text-violet-100"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
           </div>
         ) : null}
 

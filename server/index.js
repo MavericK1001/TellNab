@@ -56,6 +56,11 @@ const ADVICE_VISIBILITY = {
   PRIVATE: "PRIVATE",
 };
 
+const ADVICE_IDENTITY_MODE = {
+  ANONYMOUS: "ANONYMOUS",
+  PUBLIC: "PUBLIC",
+};
+
 const ADVICE_PRIORITY_TIER = {
   NORMAL: "NORMAL",
   PRIORITY: "PRIORITY",
@@ -450,11 +455,16 @@ if (String(process.env.ENABLE_SUPPORT_V2 || "true").toLowerCase() !== "false") {
 }
 
 function sanitizeAdvice(advice) {
+  const identityMode = resolveAdviceIdentityMode(advice);
+  const isAnonymous = identityMode === ADVICE_IDENTITY_MODE.ANONYMOUS;
+
   return {
     id: advice.id,
     title: advice.title,
-    body: advice.body,
+    body: stripLegacyAnonymousPrefix(advice.body),
     status: advice.status,
+    identityMode,
+    isAnonymous,
     visibility: advice.visibility || ADVICE_VISIBILITY.PUBLIC,
     isLocked: advice.isLocked,
     isFeatured: advice.isFeatured,
@@ -473,6 +483,7 @@ function sanitizeAdvice(advice) {
     isUrgent: Boolean(advice.isUrgent),
     followCount: Number(advice.followCount || 0),
     isFollowing: Boolean(advice.isFollowing),
+    isOwner: Boolean(advice.isOwner),
     createdAt: advice.createdAt,
     updatedAt: advice.updatedAt,
     category: advice.category
@@ -492,10 +503,11 @@ function sanitizeAdvice(advice) {
       : null,
     author: advice.author
       ? {
-          id: advice.author.id,
-          name: advice.author.name,
-          role: advice.author.role,
-          advisorProfile: advice.author.advisorProfile
+          id: isAnonymous ? undefined : advice.author.id,
+          name: isAnonymous ? "Anonymous" : advice.author.name,
+          role: isAnonymous ? undefined : advice.author.role,
+          avatarUrl: isAnonymous ? null : advice.author.avatarUrl || null,
+          advisorProfile: !isAnonymous && advice.author.advisorProfile
             ? {
                 displayName: advice.author.advisorProfile.displayName,
                 isVerified: Boolean(advice.author.advisorProfile.isVerified),
@@ -1155,6 +1167,27 @@ function normalizeText(value, maxLength) {
     .trim();
   if (!maxLength || cleaned.length <= maxLength) return cleaned;
   return `${cleaned.slice(0, maxLength - 1).trim()}…`;
+}
+
+function inferIdentityModeFromBody(body) {
+  const firstLine = String(body || "").split(/\r?\n/)[0] || "";
+  const match = firstLine.match(/^\[Anonymous:\s*(Yes|No)\]/i);
+  if (!match) return ADVICE_IDENTITY_MODE.ANONYMOUS;
+  return String(match[1]).toLowerCase() === "no"
+    ? ADVICE_IDENTITY_MODE.PUBLIC
+    : ADVICE_IDENTITY_MODE.ANONYMOUS;
+}
+
+function stripLegacyAnonymousPrefix(body) {
+  return String(body || "").replace(/^\[Anonymous:\s*(Yes|No)\]\s*\n\n?/i, "");
+}
+
+function resolveAdviceIdentityMode(advice) {
+  const current = String(advice?.identityMode || "").toUpperCase();
+  if (current === ADVICE_IDENTITY_MODE.PUBLIC || current === ADVICE_IDENTITY_MODE.ANONYMOUS) {
+    return current;
+  }
+  return inferIdentityModeFromBody(advice?.body);
 }
 
 function isLikelySpamTitle(title) {
@@ -1873,10 +1906,15 @@ const createAdviceSchema = z.object({
   body: z.string().min(10).max(5000),
   categoryId: z.string().min(1).optional(),
   groupId: z.string().min(1).optional(),
+  identityMode: z.enum([ADVICE_IDENTITY_MODE.ANONYMOUS, ADVICE_IDENTITY_MODE.PUBLIC]).optional(),
   visibility: z.enum([ADVICE_VISIBILITY.PUBLIC, ADVICE_VISIBILITY.PRIVATE]).optional(),
   tags: z.array(z.string().min(1).max(40)).max(12).optional(),
   targetAudience: z.string().min(2).max(120).optional(),
   isUrgent: z.boolean().optional(),
+});
+
+const updateAdviceIdentitySchema = z.object({
+  identityMode: z.enum([ADVICE_IDENTITY_MODE.PUBLIC]),
 });
 
 const createDiscussionGroupSchema = z.object({
@@ -4929,6 +4967,8 @@ app.post("/api/ai/moderation-hint", authRequired, moderatorOrAdminRequired, asyn
 app.post("/api/advice", authRequired, async (req, res) => {
   try {
     const data = createAdviceSchema.parse(req.body);
+    const identityMode = data.identityMode || inferIdentityModeFromBody(data.body);
+    const normalizedBody = stripLegacyAnonymousPrefix(data.body);
     const autoSpamFlag = isLikelySpamTitle(data.title);
     const normalizedTags = Array.isArray(data.tags)
       ? Array.from(new Set(data.tags.map((tag) => normalizeText(tag, 40)).filter(Boolean))).slice(0, 12)
@@ -4977,8 +5017,9 @@ app.post("/api/advice", authRequired, async (req, res) => {
     const advice = await prisma.advice.create({
       data: {
         title: data.title,
-        body: data.body,
+        body: normalizedBody,
         status: ADVICE_STATUS.PENDING,
+        identityMode,
         isSpam: autoSpamFlag,
         ...(FEATURE_PUBLIC_FEED_V2
           ? {
@@ -5457,6 +5498,47 @@ app.get("/api/advisors", async (req, res) => {
   });
 });
 
+app.get("/api/advisors/leaderboard", async (req, res) => {
+  if (!FEATURE_ADVISOR_PROFILES) {
+    return res.json({ items: [] });
+  }
+
+  const limit = Math.min(50, Math.max(5, Number(req.query.limit || 20)));
+
+  const profiles = await prisma.advisorProfile.findMany({
+    where: {
+      isPublic: true,
+    },
+    include: {
+      user: { select: { id: true, name: true, role: true, isActive: true } },
+    },
+    orderBy: [{ levelScore: "desc" }, { helpfulCount: "desc" }, { totalReplies: "desc" }],
+    take: limit,
+  });
+
+  const advisors = profiles.filter((profile) => profile.user?.isActive);
+
+  const adviceCounts = await prisma.advice.groupBy({
+    by: ["authorId"],
+    where: {
+      status: ADVICE_STATUS.APPROVED,
+      identityMode: ADVICE_IDENTITY_MODE.PUBLIC,
+      authorId: { in: advisors.map((item) => item.userId) },
+    },
+    _count: { authorId: true },
+  });
+  const countMap = new Map(adviceCounts.map((item) => [item.authorId, Number(item._count.authorId || 0)]));
+
+  return res.json({
+    items: advisors
+      .map((profile) => ({
+        ...sanitizeAdvisorProfile(profile, { isFollowing: false }),
+        adviceGiven: countMap.get(profile.userId) || 0,
+      }))
+      .filter((row) => row.adviceGiven > 0),
+  });
+});
+
 app.get("/api/advisors/:userId", async (req, res) => {
   if (!FEATURE_ADVISOR_PROFILES) {
     return sendError(res, {
@@ -5486,6 +5568,27 @@ app.get("/api/advisors/:userId", async (req, res) => {
   }
 
   let isFollowing = false;
+  const [adviceGiven, categoryRows] = await Promise.all([
+    prisma.advice.count({
+      where: {
+        authorId: profile.userId,
+        status: ADVICE_STATUS.APPROVED,
+        identityMode: ADVICE_IDENTITY_MODE.PUBLIC,
+      },
+    }),
+    prisma.advice.findMany({
+      where: {
+        authorId: profile.userId,
+        status: ADVICE_STATUS.APPROVED,
+        identityMode: ADVICE_IDENTITY_MODE.PUBLIC,
+        categoryId: { not: null },
+      },
+      include: { category: true },
+      take: 100,
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
   if (viewer) {
     const link = await prisma.advisorFollow.findUnique({
       where: {
@@ -5498,7 +5601,21 @@ app.get("/api/advisors/:userId", async (req, res) => {
     isFollowing = Boolean(link);
   }
 
-  return res.json({ advisor: sanitizeAdvisorProfile(profile, { isFollowing }) });
+  const expertiseCategories = Array.from(
+    new Set(
+      categoryRows
+        .map((item) => item.category?.name)
+        .filter(Boolean),
+    ),
+  );
+
+  return res.json({
+    advisor: {
+      ...sanitizeAdvisorProfile(profile, { isFollowing }),
+      adviceGiven,
+      expertiseCategories,
+    },
+  });
 });
 
 app.post("/api/advisors/:userId/follow", authRequired, async (req, res) => {
@@ -5584,7 +5701,8 @@ app.delete("/api/advisors/:userId/follow", authRequired, async (req, res) => {
 });
 
 app.get("/api/dashboard/summary", authRequired, async (req, res) => {
-  const [questionsAsked, repliesReceived, savedAdvice, followedAdvisors] = await Promise.all([
+  const [questionsAsked, repliesReceived, savedAdvice, followedAdvisors, anonymousQuestions, publicQuestions] =
+    await Promise.all([
     prisma.advice.count({ where: { authorId: req.user.id } }),
     prisma.adviceComment.count({
       where: {
@@ -5594,7 +5712,9 @@ app.get("/api/dashboard/summary", authRequired, async (req, res) => {
     }),
     FEATURE_SAVED_ADVICE ? prisma.savedAdvice.count({ where: { userId: req.user.id } }) : 0,
     FEATURE_ADVISOR_PROFILES ? prisma.advisorFollow.count({ where: { followerId: req.user.id } }) : 0,
-  ]);
+    prisma.advice.count({ where: { authorId: req.user.id, identityMode: ADVICE_IDENTITY_MODE.ANONYMOUS } }),
+    prisma.advice.count({ where: { authorId: req.user.id, identityMode: ADVICE_IDENTITY_MODE.PUBLIC } }),
+    ]);
 
   return res.json({
     stats: {
@@ -5603,8 +5723,59 @@ app.get("/api/dashboard/summary", authRequired, async (req, res) => {
       savedAdvice,
       followedAdvisors,
       activityScore: questionsAsked * 2 + repliesReceived + followedAdvisors,
+      anonymousQuestions,
+      publicQuestions,
     },
   });
+});
+
+app.patch("/api/advice/:id/identity", authRequired, async (req, res) => {
+  const parsed = updateAdviceIdentitySchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return sendError(res, {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      message: "Invalid identity mode",
+      details: parsed.error.issues,
+    });
+  }
+
+  const advice = await prisma.advice.findUnique({
+    where: { id: req.params.id },
+    include: { author: adviceAuthorInclude(), category: true, group: true },
+  });
+
+  if (!advice) {
+    return sendError(res, {
+      status: 404,
+      code: "ADVICE_NOT_FOUND",
+      message: "Advice not found",
+    });
+  }
+
+  if (advice.authorId !== req.user.id) {
+    return sendError(res, {
+      status: 403,
+      code: "FORBIDDEN",
+      message: "Only the author can update identity",
+    });
+  }
+
+  const currentMode = resolveAdviceIdentityMode(advice);
+  if (currentMode === ADVICE_IDENTITY_MODE.PUBLIC) {
+    return res.json({ advice: sanitizeAdvice(advice), converted: false });
+  }
+
+  const updated = await prisma.advice.update({
+    where: { id: advice.id },
+    data: {
+      identityMode: ADVICE_IDENTITY_MODE.PUBLIC,
+      body: stripLegacyAnonymousPrefix(advice.body),
+    },
+    include: { author: adviceAuthorInclude(), category: true, group: true },
+  });
+
+  return res.json({ advice: sanitizeAdvice({ ...updated, isOwner: true }), converted: true });
 });
 
 app.post("/api/advice/:id/follow", authRequired, async (req, res) => {
@@ -5909,7 +6080,12 @@ app.get("/api/advice/:id", async (req, res) => {
   }
 
   return res.json({
-    advice: sanitizeAdvice({ ...advice, followCount, isFollowing: followedByCurrentUser }),
+    advice: sanitizeAdvice({
+      ...advice,
+      followCount,
+      isFollowing: followedByCurrentUser,
+      isOwner: Boolean(viewer && viewer.id === advice.authorId),
+    }),
     comments: advice.comments.map((comment) => ({
       id: comment.id,
       body: comment.body,
@@ -5936,6 +6112,7 @@ app.get("/api/public/q/:id", async (req, res) => {
   const advice = await prisma.advice.findUnique({
     where: { id: req.params.id },
     include: {
+      author: { select: { name: true } },
       category: true,
       _count: { select: { comments: true } },
     },
@@ -5965,11 +6142,18 @@ app.get("/api/public/q/:id", async (req, res) => {
       id: advice.id,
       title: normalizedTitle,
       body: normalizedBody,
+      identityMode: resolveAdviceIdentityMode(advice),
       category: advice.category ? { id: advice.category.id, name: advice.category.name } : null,
       replyCount: Number(advice._count?.comments || 0),
       createdAt: advice.createdAt,
       isUrgent: Boolean(advice.isUrgent),
       tags: parseJsonArray(advice.tags),
+      author:
+        resolveAdviceIdentityMode(advice) === ADVICE_IDENTITY_MODE.PUBLIC
+          ? {
+              name: advice.author?.name || "TellNab Member",
+            }
+          : null,
     },
     ctaUrl: `/advice/${advice.id}`,
     share: {

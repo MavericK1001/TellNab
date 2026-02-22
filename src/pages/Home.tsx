@@ -6,12 +6,14 @@ import {
   getConversations,
   getHomeOverview,
   getProfile,
+  listAdvisorLeaderboard,
   listAdvice,
   listFollowingAdvice,
   listNotifications,
 } from "../services/api";
 import {
   AdviceItem,
+  AdvisorProfile,
   ConversationSummary,
   HomeOverview,
   NotificationItem,
@@ -51,6 +53,7 @@ export default function Home() {
   >([]);
   const [watchlist, setWatchlist] = useState<AdviceItem[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [leaderboard, setLeaderboard] = useState<AdvisorProfile[]>([]);
   const [loadingMomentum, setLoadingMomentum] = useState(false);
   const [momentumError, setMomentumError] = useState<string | null>(null);
 
@@ -109,6 +112,10 @@ export default function Home() {
         if (threadsResult.status === "fulfilled") {
           setThreads(threadsResult.value.slice(0, 8));
         }
+
+        listAdvisorLeaderboard(5)
+          .then((rows) => setLeaderboard(rows))
+          .catch(() => setLeaderboard([]));
 
         if (overviewResult.status === "fulfilled") {
           setOverview(overviewResult.value);
@@ -307,22 +314,22 @@ export default function Home() {
               Dashboard mode • high-signal decisions
             </span>
             <h1 className="text-4xl font-black leading-tight text-white sm:text-5xl">
-              Decide faster with moderated, high-signal community advice.
+              Ask for advice your way — anonymously or publicly.
             </h1>
             <p className="max-w-xl text-slate-300">
-              Open live threads, ask your own dilemma, and track outcomes in one
-              focused dashboard. Built for clarity, not noise.
+              Post with full privacy or with your profile. TellNab keeps advice
+              high-signal, moderated, and actionable.
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <Button to="/advice" className="rounded-xl px-5 py-3">
-                {user ? "Continue threads" : "Open threads"}
+              <Button to="/ask" className="rounded-xl px-5 py-3">
+                Ask Anonymously
               </Button>
               <Button
-                to="/ask"
+                to="/ask?identity=PUBLIC"
                 variant="secondary"
                 className="rounded-xl px-5 py-3"
               >
-                Ask now
+                Ask with Profile
               </Button>
               <Button
                 to="/feed"
@@ -332,6 +339,9 @@ export default function Home() {
                 Browse feed
               </Button>
             </div>
+            <p className="text-sm font-medium text-violet-100/90">
+              Your identity, your choice.
+            </p>
           </div>
 
           <Card className="border-white/15 bg-gradient-to-b from-slate-900/82 to-slate-900/65 p-5 home-float-soft">
@@ -401,6 +411,41 @@ export default function Home() {
         </div>
       </section>
 
+      {leaderboard.length > 0 ? (
+        <section
+          data-reveal
+          className="reveal-block rounded-2xl border border-white/10 bg-slate-900/70 p-5"
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">
+              Public advisor leaderboard
+            </h2>
+            <Link to="/feed" className="text-xs font-semibold text-violet-200">
+              View feed
+            </Link>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            {leaderboard.map((advisor, index) => (
+              <div
+                key={advisor.userId}
+                className="rounded-xl border border-white/10 bg-slate-950 p-3"
+              >
+                <p className="text-xs text-slate-400">#{index + 1}</p>
+                <p className="mt-1 line-clamp-1 text-sm font-semibold text-white">
+                  {advisor.displayName}
+                </p>
+                <p className="mt-1 text-xs text-slate-300">
+                  {advisor.level?.replaceAll("_", " ") || "Advisor"}
+                </p>
+                <p className="mt-1 text-xs text-violet-200">
+                  Helpful {advisor.helpfulCount || 0}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section
         data-reveal
         className="reveal-block grid gap-4 lg:grid-cols-[1.35fr_0.65fr]"
@@ -442,6 +487,15 @@ export default function Home() {
                     {thread.title}
                   </p>
                   <div className="flex flex-wrap gap-1">
+                    {thread.identityMode === "ANONYMOUS" || thread.isAnonymous ? (
+                      <span className="rounded-full border border-slate-300/25 bg-slate-500/10 px-2 py-0.5 text-[10px] font-semibold text-slate-200">
+                        Anonymous
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-cyan-300/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
+                        Public
+                      </span>
+                    )}
                     {thread.isBoostActive ? (
                       <span className="rounded-full border border-rose-300/25 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-200">
                         Boosted
@@ -465,10 +519,20 @@ export default function Home() {
                 </p>
 
                 <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                  <span>
-                    by {thread.author?.name || "Unknown"} •{" "}
-                    {formatRelativeTime(thread.createdAt)}
-                  </span>
+                  {thread.identityMode === "PUBLIC" ? (
+                    <span className="inline-flex items-center gap-2">
+                      {thread.author?.avatarUrl ? (
+                        <img
+                          src={thread.author.avatarUrl}
+                          alt={thread.author?.name || "Profile"}
+                          className="h-5 w-5 rounded-full border border-white/20 object-cover"
+                        />
+                      ) : null}
+                      by {thread.author?.name || "Unknown"} • {formatRelativeTime(thread.createdAt)}
+                    </span>
+                  ) : (
+                    <span>by Anonymous • {formatRelativeTime(thread.createdAt)}</span>
+                  )}
                   <Link
                     to={`/advice/${thread.id}`}
                     className="text-xs font-semibold text-violet-200 hover:text-violet-100"

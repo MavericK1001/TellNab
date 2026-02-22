@@ -226,7 +226,7 @@ export default function Profile() {
           subtitle="Manage your identity, security, and personalized profile controls."
         />
         {dashboardStats ? (
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
             <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
               Questions {dashboardStats.questionsAsked}
             </div>
@@ -241,6 +241,12 @@ export default function Profile() {
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
               Activity {dashboardStats.activityScore}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Anonymous {dashboardStats.anonymousQuestions || 0}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-200">
+              Public {dashboardStats.publicQuestions || 0}
             </div>
           </div>
         ) : null}

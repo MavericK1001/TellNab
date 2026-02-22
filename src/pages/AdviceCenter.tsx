@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
 import Button from "../components/Button";
 import Card from "../components/Card";
+import IdentityModeSelector from "../components/IdentityModeSelector";
 import {
   addAdviceComment,
   createAdviceBoostCheckout,
@@ -35,6 +36,9 @@ export default function AdviceCenter() {
   const [error, setError] = useState<string | null>(null);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [submitIsError, setSubmitIsError] = useState(false);
+  const [composerIdentityMode, setComposerIdentityMode] = useState<
+    "ANONYMOUS" | "PUBLIC"
+  >("ANONYMOUS");
   const [submittingAdvice, setSubmittingAdvice] = useState(false);
   const submittingAdviceRef = useRef(false);
   const [followedIds, setFollowedIds] = useState<string[]>([]);
@@ -114,8 +118,9 @@ export default function AdviceCenter() {
     try {
       setSubmitMessage(null);
       setSubmitIsError(false);
-      await createAdvice({ title, body });
+      await createAdvice({ title, body, identityMode: composerIdentityMode });
       formElement.reset();
+      setComposerIdentityMode("ANONYMOUS");
       setSubmitMessage("Submitted for approval. A moderator will review it.");
       await loadAdvice();
     } catch (err) {
@@ -303,6 +308,10 @@ export default function AdviceCenter() {
 
           {user ? (
             <form className="mt-4 space-y-3" onSubmit={onCreateAdvice}>
+              <IdentityModeSelector
+                value={composerIdentityMode}
+                onChange={setComposerIdentityMode}
+              />
               <input
                 name="title"
                 required
@@ -363,6 +372,15 @@ export default function AdviceCenter() {
               >
                 <p className="text-base font-semibold text-white">
                   {item.title}
+                  {item.identityMode === "ANONYMOUS" || item.isAnonymous ? (
+                    <span className="ml-2 rounded-full bg-slate-500/20 px-2 py-0.5 text-xs text-slate-200">
+                      Anonymous
+                    </span>
+                  ) : (
+                    <span className="ml-2 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs text-cyan-100">
+                      Public profile
+                    </span>
+                  )}
                   {item.isBoostActive ? (
                     <span className="ml-2 rounded-full bg-rose-500/20 px-2 py-0.5 text-xs text-rose-200">
                       Boosted
@@ -378,7 +396,10 @@ export default function AdviceCenter() {
                   {item.body}
                 </p>
                 <p className="mt-2 text-xs text-slate-400">
-                  by {item.author?.name || "Unknown"}
+                  by{" "}
+                  {item.identityMode === "PUBLIC"
+                    ? item.author?.name || "Unknown"
+                    : "Anonymous"}
                 </p>
                 <div className="mt-2 text-xs text-violet-300">
                   <Link to={`/advice/${item.id}`}>Open full thread →</Link>
