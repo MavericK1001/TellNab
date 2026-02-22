@@ -60,7 +60,9 @@ export default function QuestionShare() {
         ) : null}
         <p className="mt-3 text-sm text-slate-300">{question.body}</p>
         {question.identityMode === "PUBLIC" && question.author?.name ? (
-          <p className="mt-2 text-xs text-slate-400">by {question.author.name}</p>
+          <p className="mt-2 text-xs text-slate-400">
+            by {question.author.name}
+          </p>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
           {question.category?.name ? (

@@ -1,8 +1,9 @@
-import React, { FormEvent, useState } from "react";
+import React, { FormEvent, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import Button from "../components/Button";
 import IdentityModeSelector from "../components/IdentityModeSelector";
+import { useAuth } from "../context/AuthContext";
 import {
   createAdvice,
   generateAdviceDraftWithAi,
@@ -25,6 +26,7 @@ function parseApiError(error: unknown, fallback: string): string {
 }
 
 export default function Ask() {
+  const { user } = useAuth();
   const location = useLocation();
   const phaseUrgentMode =
     String(import.meta.env.VITE_PHASE1_URGENT_MODE || "false").toLowerCase() ===
@@ -52,6 +54,10 @@ export default function Ask() {
   const [isUrgent, setIsUrgent] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [postLanguage, setPostLanguage] = useState<
+    "ENGLISH" | "URDU" | "ROMAN_URDU"
+  >("ENGLISH");
+  const [showSignupPrompt, setShowSignupPrompt] = useState(false);
 
   React.useEffect(() => {
     listCategories()
@@ -71,11 +77,25 @@ export default function Ask() {
   }, [location.search]);
 
   useSeo({
-    title: "Ask for Advice - Post Your Dilemma | TellNab",
+    title: "Instant Ask Flow - Anonymous Advice | TellNab",
     description:
-      "Post your question anonymously and get direct, moderated advice from the TellNab community.",
+      "Share your situation in 3 simple steps and get honest advice from real people across Pakistan.",
     path: "/ask",
   });
+
+  const localizedCategoryLabels = useMemo(
+    () => [
+      "Career",
+      "Freelancing",
+      "CSS & Govt Jobs",
+      "Abroad / Visa",
+      "Rishta & Marriage",
+      "University / Students",
+      "Business",
+      "Family Issues",
+    ],
+    [],
+  );
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -90,39 +110,45 @@ export default function Ask() {
         .filter(Boolean)
         .slice(0, 12);
 
+      const withLanguageTag = Array.from(
+        new Set([
+          ...tags,
+          `lang:${postLanguage.toLowerCase().replaceAll("_", "-")}`,
+        ]),
+      ).slice(0, 12);
+
       await createAdvice({
         title,
         body: question,
         categoryId: categoryId || undefined,
-        identityMode,
+        identityMode: "ANONYMOUS",
         ...(phaseSmartMatching
           ? {
-              tags,
+              tags: withLanguageTag,
               targetAudience: targetAudience.trim() || undefined,
             }
-          : {}),
+          : { tags: withLanguageTag }),
         ...(phaseUrgentMode ? { isUrgent } : {}),
       });
       setStatus(
-        "Question submitted for moderation. You can track it in Advice.",
+        "Your anonymous post is live in moderation. People are viewing your problem. New advice coming in.",
       );
       setTitle("");
       setQuestion("");
-      setIdentityMode("ANONYMOUS");
       setIsUrgent(false);
       setTagsInput("");
       setTargetAudience("");
       setAiSuggestions([]);
       setAiProvider(null);
+      setPostLanguage("ENGLISH");
+      if (!user) {
+        setShowSignupPrompt(true);
+      }
       if (categories[0]?.id) {
         setCategoryId(categories[0].id);
       }
     } catch (error) {
-      if (isAxiosError(error) && error.response?.status === 401) {
-        setStatus("Please login first to submit your question.");
-      } else {
-        setStatus(parseApiError(error, "Submission failed. Please try again."));
-      }
+      setStatus(parseApiError(error, "Submission failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -168,16 +194,18 @@ export default function Ask() {
       <section className="lg:col-span-2">
         <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/80 to-slate-900/60 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
           <h2 className="mb-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            Ask for advice your way — anonymously or publicly.
+            Instant Ask Flow
           </h2>
-          <IdentityModeSelector
-            value={identityMode}
-            onChange={setIdentityMode}
-          />
+          <p className="mb-4 text-sm text-violet-100">
+            Step 1: Select category • Step 2: Write your situation • Step 3:
+            Post anonymously
+          </p>
+
+          <IdentityModeSelector value={"ANONYMOUS"} onChange={() => null} />
 
           <p className="mb-6 text-sm leading-6 text-slate-300">
-            Write clearly, keep it short, and include enough context for better
-            responses.
+            No signup required to post. Share context clearly to get better,
+            faster responses.
           </p>
 
           <form className="space-y-5" onSubmit={handleSubmit}>
@@ -198,7 +226,7 @@ export default function Ask() {
 
             <div>
               <label className="block text-sm font-medium text-slate-200">
-                Category
+                Step 1 — Category
               </label>
               <select
                 name="categoryId"
@@ -239,6 +267,50 @@ export default function Ask() {
                   })}
                 </div>
               ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {localizedCategoryLabels.map((name) => (
+                  <span
+                    key={name}
+                    className="rounded-full border border-cyan-300/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] text-cyan-100"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-200">
+                Language
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[
+                  { key: "ENGLISH", label: "English" },
+                  { key: "URDU", label: "Urdu" },
+                  { key: "ROMAN_URDU", label: "Roman Urdu" },
+                ].map((language) => {
+                  const active = postLanguage === language.key;
+                  return (
+                    <button
+                      key={language.key}
+                      type="button"
+                      onClick={() =>
+                        setPostLanguage(
+                          language.key as "ENGLISH" | "URDU" | "ROMAN_URDU",
+                        )
+                      }
+                      className={`rounded-xl border px-3 py-1.5 text-xs transition ${
+                        active
+                          ? "border-violet-300/70 bg-violet-500/20 text-violet-100"
+                          : "border-white/15 bg-slate-900/65 text-slate-300 hover:border-white/30"
+                      }`}
+                    >
+                      {language.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {phaseUrgentMode ? (
@@ -286,7 +358,7 @@ export default function Ask() {
 
             <div>
               <label className="block text-sm font-medium text-slate-200">
-                Question
+                Step 2 — Write your situation
               </label>
               <textarea
                 rows={7}
@@ -357,7 +429,7 @@ export default function Ask() {
                   Preview
                 </Button>
                 <Button type="submit" className={loading ? "opacity-70" : ""}>
-                  {loading ? "Publishing..." : "Publish question"}
+                  {loading ? "Posting..." : "Step 3 — Post anonymously"}
                 </Button>
               </div>
             </div>
@@ -367,12 +439,30 @@ export default function Ask() {
                 type="submit"
                 className={`w-full ${loading ? "opacity-70" : ""}`}
               >
-                {loading ? "Publishing..." : "Publish question"}
+                {loading ? "Posting..." : "Ask for Advice"}
               </Button>
             </div>
 
             {status ? (
               <p className="text-sm text-emerald-300">{status}</p>
+            ) : null}
+
+            {showSignupPrompt ? (
+              <div className="rounded-2xl border border-violet-300/30 bg-violet-500/15 p-4">
+                <p className="text-sm font-semibold text-violet-100">
+                  Your question is submitted. Create an account to track replies,
+                  save threads, and get notifications.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button to="/register">Continue with Signup</Button>
+                  <Link
+                    to="/advice"
+                    className="inline-flex items-center rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                  >
+                    View advice feed
+                  </Link>
+                </div>
+              </div>
             ) : null}
           </form>
         </div>

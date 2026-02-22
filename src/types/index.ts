@@ -209,8 +209,19 @@ export type HomeOverview = {
     totalComments: number;
     activeMembers: number;
     pendingReview: number;
+    questionsAsked?: number;
+    answersGiven?: number;
+    activeAdvisors?: number;
   };
   highlights: AdviceItem[];
+  latestQuestions?: AdviceItem[];
+  trendingTopics?: Array<{
+    id: string;
+    slug: string;
+    name: string;
+    count: number;
+  }>;
+  recentlyAnswered?: AdviceItem[];
 };
 
 export type UserRole = "MEMBER" | "MODERATOR" | "ADMIN";

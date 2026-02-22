@@ -75,6 +75,12 @@ export default function Feed() {
   }, [query]);
 
   const filtered = useMemo(() => posts, [posts]);
+  const mostHelpfulPostId = useMemo(() => {
+    if (!filtered.length) return null;
+    return [...filtered].sort(
+      (a, b) => Number(b.helpfulCount || 0) - Number(a.helpfulCount || 0),
+    )[0]?.id;
+  }, [filtered]);
 
   async function onHelpful(post: AdviceItem) {
     try {
@@ -246,6 +252,16 @@ export default function Feed() {
                       >
                         Verified advisor
                       </Link>
+                    ) : null}
+                    {Number(post.author?.advisorProfile?.helpfulCount || 0) >= 25 ? (
+                      <span className="rounded-full border border-amber-300/25 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
+                        Top Contributor
+                      </span>
+                    ) : null}
+                    {mostHelpfulPostId === post.id ? (
+                      <span className="rounded-full border border-violet-300/25 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-100">
+                        Most Helpful Answer
+                      </span>
                     ) : null}
                   </div>
                   <div className="flex items-center gap-2">

@@ -174,6 +174,9 @@ const PHASE1_SMART_MATCHING = String(process.env.PHASE1_SMART_MATCHING || "false
 const PHASE1_ADVISOR_LEVELS = String(process.env.PHASE1_ADVISOR_LEVELS || "false").toLowerCase() === "true";
 const PHASE1_URGENT_MODE = String(process.env.PHASE1_URGENT_MODE || "false").toLowerCase() === "true";
 const PHASE1_SHARE_CARDS = String(process.env.PHASE1_SHARE_CARDS || "false").toLowerCase() === "true";
+const GUEST_ADVICE_EMAIL =
+  String(process.env.GUEST_ADVICE_EMAIL || "anonymous.poster@tellnab.local").trim().toLowerCase();
+const GUEST_ADVICE_NAME = String(process.env.GUEST_ADVICE_NAME || "Anonymous User").trim() || "Anonymous User";
 
 const WALLET_BALANCE_TYPES = {
   PAID: "PAID",
@@ -1188,6 +1191,37 @@ function resolveAdviceIdentityMode(advice) {
     return current;
   }
   return inferIdentityModeFromBody(advice?.body);
+}
+
+let guestAdviceUserCache = null;
+
+async function getOrCreateGuestAdviceUser() {
+  if (guestAdviceUserCache?.id) {
+    return guestAdviceUserCache;
+  }
+
+  const passwordHash = await bcrypt.hash(`guest-${JWT_SECRET}`, 8);
+  const user = await prisma.user.upsert({
+    where: { email: GUEST_ADVICE_EMAIL },
+    update: {
+      name: GUEST_ADVICE_NAME,
+      role: ROLES.MEMBER,
+      isActive: true,
+      hasPassword: false,
+    },
+    create: {
+      email: GUEST_ADVICE_EMAIL,
+      name: GUEST_ADVICE_NAME,
+      passwordHash,
+      role: ROLES.MEMBER,
+      isActive: true,
+      hasPassword: false,
+      authProvider: "LOCAL",
+    },
+  });
+
+  guestAdviceUserCache = user;
+  return user;
 }
 
 function isLikelySpamTitle(title) {
@@ -4101,7 +4135,22 @@ app.get("/api/home/overview", async (_req, res) => {
   try {
     await clearExpiredBoosts();
 
-    const [approvedThreads, featuredThreads, boostedThreads, totalComments, activeMembers, pendingReview, highlights] =
+    const thirtyDaysAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 30);
+
+    const [
+      approvedThreads,
+      featuredThreads,
+      boostedThreads,
+      totalComments,
+      activeMembers,
+      pendingReview,
+      totalQuestions,
+      activeAdvisorRows,
+      highlights,
+      latestQuestions,
+      recentComments,
+      topicSource,
+    ] =
       await Promise.all([
         prisma.advice.count({ where: { status: ADVICE_STATUS.APPROVED } }),
         prisma.advice.count({ where: { status: ADVICE_STATUS.APPROVED, isFeatured: true } }),
@@ -4109,13 +4158,68 @@ app.get("/api/home/overview", async (_req, res) => {
         prisma.adviceComment.count(),
         prisma.user.count({ where: { isActive: true } }),
         prisma.advice.count({ where: { status: ADVICE_STATUS.PENDING } }),
+        prisma.advice.count(),
+        prisma.adviceComment.findMany({
+          where: { createdAt: { gte: thirtyDaysAgo } },
+          select: { authorId: true },
+          distinct: ["authorId"],
+        }),
         prisma.advice.findMany({
           where: { status: ADVICE_STATUS.APPROVED },
           orderBy: [{ isBoostActive: "desc" }, { isFeatured: "desc" }, { createdAt: "desc" }],
           take: 3,
           include: { author: true, category: true, group: true },
         }),
+        prisma.advice.findMany({
+          where: { status: ADVICE_STATUS.APPROVED },
+          orderBy: [{ createdAt: "desc" }],
+          take: 6,
+          include: { author: true, category: true, group: true },
+        }),
+        prisma.adviceComment.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 100,
+          include: {
+            advice: {
+              include: { author: true, category: true, group: true },
+            },
+          },
+        }),
+        prisma.advice.findMany({
+          where: { status: ADVICE_STATUS.APPROVED, categoryId: { not: null } },
+          orderBy: [{ createdAt: "desc" }],
+          take: 150,
+          include: { category: true },
+        }),
       ]);
+
+    const trendingCounts = new Map();
+    for (const item of topicSource) {
+      if (!item.category) continue;
+      const key = item.category.id;
+      const existing = trendingCounts.get(key) || {
+        id: item.category.id,
+        slug: item.category.slug,
+        name: item.category.name,
+        count: 0,
+      };
+      existing.count += 1;
+      trendingCounts.set(key, existing);
+    }
+
+    const trendingTopics = Array.from(trendingCounts.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    const recentMap = new Map();
+    for (const comment of recentComments) {
+      const advice = comment.advice;
+      if (!advice || advice.status !== ADVICE_STATUS.APPROVED || recentMap.has(advice.id)) continue;
+      recentMap.set(advice.id, sanitizeAdvice(advice));
+      if (recentMap.size >= 6) break;
+    }
+
+    const recentlyAnswered = Array.from(recentMap.values());
 
     return res.json({
       metrics: {
@@ -4125,8 +4229,14 @@ app.get("/api/home/overview", async (_req, res) => {
         totalComments,
         activeMembers,
         pendingReview,
+        questionsAsked: totalQuestions,
+        answersGiven: totalComments,
+        activeAdvisors: activeAdvisorRows.length,
       },
       highlights: highlights.map(sanitizeAdvice),
+      latestQuestions: latestQuestions.map(sanitizeAdvice),
+      trendingTopics,
+      recentlyAnswered,
     });
   } catch {
     return res.status(500).json({ message: "Failed to load homepage overview" });
@@ -4964,10 +5074,15 @@ app.post("/api/ai/moderation-hint", authRequired, moderatorOrAdminRequired, asyn
   }
 });
 
-app.post("/api/advice", authRequired, async (req, res) => {
+app.post("/api/advice", async (req, res) => {
   try {
+    const viewer = await getOptionalAuthUser(req);
+    const actorUser = viewer || (await getOrCreateGuestAdviceUser());
+    const isGuestSubmission = !viewer;
     const data = createAdviceSchema.parse(req.body);
-    const identityMode = data.identityMode || inferIdentityModeFromBody(data.body);
+    const identityMode = isGuestSubmission
+      ? ADVICE_IDENTITY_MODE.ANONYMOUS
+      : data.identityMode || inferIdentityModeFromBody(data.body);
     const normalizedBody = stripLegacyAnonymousPrefix(data.body);
     const autoSpamFlag = isLikelySpamTitle(data.title);
     const normalizedTags = Array.isArray(data.tags)
@@ -4993,12 +5108,12 @@ app.post("/api/advice", authRequired, async (req, res) => {
       resolvedCategoryId = await resolveDefaultCategoryId();
     }
 
-    let resolvedGroupId = data.groupId || null;
+    let resolvedGroupId = isGuestSubmission ? null : data.groupId || null;
     if (resolvedGroupId) {
       const membership = await prisma.groupMembership.findFirst({
         where: {
           groupId: resolvedGroupId,
-          userId: req.user.id,
+          userId: actorUser.id,
         },
         include: {
           group: true,
@@ -5043,7 +5158,7 @@ app.post("/api/advice", authRequired, async (req, res) => {
               isUrgent,
             }
           : {}),
-        authorId: req.user.id,
+        authorId: actorUser.id,
         categoryId: resolvedCategoryId,
         groupId: resolvedGroupId,
       },
@@ -5054,12 +5169,14 @@ app.post("/api/advice", authRequired, async (req, res) => {
       },
     });
 
-    await evaluateAutoBadges(req.user.id);
+    if (!isGuestSubmission) {
+      await evaluateAutoBadges(actorUser.id);
+    }
 
     if (isCrisisFlagged) {
       await notifyCrisisModerationQueue({
         adviceId: advice.id,
-        actorName: req.user.name,
+        actorName: actorUser.name,
         source: "an advice thread",
       });
     }

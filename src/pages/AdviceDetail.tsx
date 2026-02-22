@@ -400,7 +400,10 @@ export default function AdviceDetail() {
         <h1 className="text-2xl font-bold text-white">{advice.title}</h1>
         <p className="mt-2 text-slate-300">{advice.body}</p>
         <p className="mt-2 text-xs text-slate-400">
-          by {advice.identityMode === "PUBLIC" ? advice.author?.name || "Unknown" : "Anonymous"}
+          by{" "}
+          {advice.identityMode === "PUBLIC"
+            ? advice.author?.name || "Unknown"
+            : "Anonymous"}
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <span
