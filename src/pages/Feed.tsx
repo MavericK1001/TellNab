@@ -5,6 +5,7 @@ import SectionTitle from "../components/SectionTitle";
 import UserIdentityDisplay from "../components/UserIdentityDisplay";
 import { listCategories, listPublicFeed, reactHelpful } from "../services/api";
 import { AdviceItem, CategoryItem } from "../types";
+import { buildSupportRequestUrl } from "../utils/support";
 import { useSeo } from "../utils/seo";
 
 export default function Feed() {
@@ -106,10 +107,10 @@ export default function Feed() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
+      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-violet-500/18 via-slate-900/75 to-cyan-500/12 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
         <SectionTitle
           title="Thread Feed"
-          subtitle="Live approved threads from the community. Open any thread to read and reply."
+          subtitle="Live approved threads from the community. Curated, trustworthy, and easy to explore."
         />
       </div>
 
@@ -165,10 +166,12 @@ export default function Feed() {
             {filtered.map((post) => (
               <Card
                 key={post.id}
-                className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65 transition hover:border-violet-400/40"
+                className="group overflow-hidden border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/65 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/45"
               >
+                <div className="-mx-6 -mt-6 mb-4 h-24 border-b border-white/10 bg-gradient-to-r from-violet-500/22 via-fuchsia-500/12 to-cyan-500/20" />
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200">
                       {post.status}
                     </span>
@@ -213,15 +216,15 @@ export default function Feed() {
                       </span>
                     ) : null}
                   </div>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-[11px] font-medium text-slate-400">
                     {new Date(post.createdAt).toLocaleString()}
                   </p>
                 </div>
 
-                <h3 className="mt-3 text-lg font-semibold text-white">
+                <h3 className="mt-3 text-xl font-bold tracking-tight text-white sm:text-[1.35rem]">
                   {post.title}
                 </h3>
-                <p className="mt-2 line-clamp-3 text-sm text-slate-300">
+                <p className="mt-2 line-clamp-3 text-[15px] leading-7 text-slate-300">
                   {post.body}
                 </p>
 
@@ -281,16 +284,28 @@ export default function Feed() {
                       type="button"
                       disabled={reactionBusyId === post.id}
                       onClick={() => void onHelpful(post)}
-                      className="inline-flex items-center justify-center rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-60"
+                      className="ui-interactive inline-flex items-center justify-center rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-60"
                     >
                       Helpful {post.helpfulCount || 0}
                     </button>
                     <Link
                       to={`/advice/${post.id}`}
-                      className="inline-flex items-center justify-center rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
+                      className="ui-interactive inline-flex items-center justify-center rounded-xl border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
                     >
                       Open thread
                     </Link>
+                    <a
+                      href={buildSupportRequestUrl({
+                        type: "ABUSE",
+                        subject: "Report thread",
+                        adviceId: post.id,
+                      })}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ui-interactive inline-flex items-center justify-center rounded-xl border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20"
+                    >
+                      Report
+                    </a>
                   </div>
                 </div>
               </Card>
@@ -310,7 +325,7 @@ export default function Feed() {
                   type="button"
                   onClick={() => void loadPage(false)}
                   disabled={loadingMore}
-                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60"
+                  className="ui-interactive rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60"
                 >
                   {loadingMore ? "Loading…" : "Load more"}
                 </button>

@@ -14,11 +14,11 @@ type ButtonProps = {
 };
 
 const base =
-  "inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold tracking-[0.01em] transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+  "ui-interactive inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold tracking-[0.01em] transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-r from-violet-500 via-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-900/30 hover:-translate-y-0.5 hover:from-violet-400 hover:to-fuchsia-400 hover:shadow-violet-900/45 active:translate-y-0",
+    "bg-gradient-to-r from-violet-500 via-violet-500 to-cyan-500 text-white shadow-[0_14px_30px_-16px_rgba(124,58,237,0.95)] hover:-translate-y-0.5 hover:from-violet-400 hover:to-cyan-400 hover:shadow-[0_20px_36px_-18px_rgba(124,58,237,0.98)] active:translate-y-0",
   secondary:
     "border border-white/15 bg-slate-900/70 text-slate-100 shadow-[inset_0_1px_0_0_rgb(255_255_255_/_0.06)] hover:-translate-y-0.5 hover:border-white/25 hover:bg-slate-800/80",
   ghost:

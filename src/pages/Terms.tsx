@@ -38,6 +38,41 @@ export default function Terms() {
           <li>Moderators may remove content that breaks these terms.</li>
         </ul>
       </Card>
+
+      <Card>
+        <h3 className="text-lg font-semibold text-white">
+          Abuse and spam policy
+        </h3>
+        <p className="mt-2 text-sm text-slate-300">
+          We actively moderate harassment, manipulation, repeat spam, scams, and
+          harmful content. Reports from users and moderator reviews both trigger
+          action.
+        </p>
+        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-300">
+          <li>
+            <span className="font-semibold text-slate-100">Disallowed:</span>{" "}
+            threats, hate, targeted abuse, doxxing, sexual exploitation,
+            scam/promo spam, and repeated low-quality posting.
+          </li>
+          <li>
+            <span className="font-semibold text-slate-100">Enforcement:</span>{" "}
+            hold, remove, lock, and spam-flag actions are applied per thread
+            severity and repeat behavior.
+          </li>
+          <li>
+            <span className="font-semibold text-slate-100">Escalation:</span>{" "}
+            urgent risk indicators are routed for priority moderation review.
+          </li>
+        </ul>
+      </Card>
+
+      <Card>
+        <h3 className="text-lg font-semibold text-white">Urgent safety note</h3>
+        <p className="mt-2 text-sm text-slate-300">
+          TellNab is not an emergency service. If someone is in immediate
+          danger, contact local emergency services immediately.
+        </p>
+      </Card>
     </div>
   );
 }

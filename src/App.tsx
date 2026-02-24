@@ -27,7 +27,7 @@ import MobileBottomNav from "./components/MobileBottomNav";
 export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1080px_520px_at_8%_-12%,rgba(124,58,237,0.34),transparent),radial-gradient(980px_460px_at_95%_0%,rgba(56,189,248,0.26),transparent),radial-gradient(760px_420px_at_50%_110%,rgba(16,185,129,0.12),transparent)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1080px_520px_at_8%_-12%,rgba(124,58,237,0.30),transparent),radial-gradient(980px_460px_at_95%_0%,rgba(6,182,212,0.18),transparent),radial-gradient(760px_420px_at_50%_110%,rgba(34,197,94,0.09),transparent)]" />
       <Navbar />
       <main className="mx-auto w-full max-w-7xl px-4 py-8 pb-24 sm:px-6 lg:px-8 lg:pb-8">
         <Routes>

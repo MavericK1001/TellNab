@@ -213,6 +213,16 @@ export default function Profile() {
     [],
   );
 
+  const adviceGiven = profile?.totalAnswers || profile?.replies || 0;
+  const impactCount = profile?.helpfulAnswersCount || 0;
+  const activityScore = dashboardStats?.activityScore || 0;
+  const streakDays = Math.max(1, Math.min(30, Math.round(activityScore / 4)));
+  const moodActivityLabel =
+    (dashboardStats?.anonymousQuestions || 0) >=
+    (dashboardStats?.publicQuestions || 0)
+      ? "Mostly anonymous"
+      : "Balanced identity";
+
   if (!profile || !wallet) {
     return (
       <Card>
@@ -223,10 +233,13 @@ export default function Profile() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
+      <div className="premium-glass rounded-3xl bg-gradient-to-br from-violet-500/16 via-slate-900/74 to-cyan-500/12 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
+        <div className="inline-flex items-center rounded-full border border-violet-300/30 bg-violet-500/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-100">
+          Anonymous profile mode
+        </div>
         <SectionTitle
-          title="Profile settings"
-          subtitle="Manage your identity, security, and personalized profile controls."
+          title="Community profile"
+          subtitle="Track your anonymous impact, contribution quality, and account controls in one place."
         />
         <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/55 p-4">
           <UserIdentityDisplay
@@ -253,6 +266,40 @@ export default function Profile() {
               {(profile.expertiseCategories || []).slice(0, 2).join(" • ") ||
                 "General"}
             </div>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">
+              Mood activity
+            </p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              {moodActivityLabel}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">
+              Advice given
+            </p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              {adviceGiven}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">
+              Community impact
+            </p>
+            <p className="mt-1 text-sm font-semibold text-emerald-300">
+              {impactCount} helpful
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">
+              Streak
+            </p>
+            <p className="mt-1 text-sm font-semibold text-violet-200">
+              {streakDays}-day consistency
+            </p>
           </div>
         </div>
         {dashboardStats ? (
@@ -290,7 +337,7 @@ export default function Profile() {
                 key={item.key}
                 type="button"
                 onClick={() => setActiveSection(item.key)}
-                className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
+                className={`ui-interactive w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
                   activeSection === item.key
                     ? "bg-violet-500/20 text-violet-100"
                     : "text-slate-300 hover:bg-white/5 hover:text-white"

@@ -1,26 +1,11 @@
 import React from "react";
-
-const DEFAULT_SUPPORT_URL = "https://support.tellnab.com";
+import { buildSupportRequestUrl } from "../utils/support";
 
 export default function ReportIssueButton() {
-  const supportBase =
-    (import.meta.env.VITE_SUPPORT_SITE_URL as string | undefined) ||
-    DEFAULT_SUPPORT_URL;
-  const supportVersion = "20260220";
-
-  const pageUrl =
-    typeof window !== "undefined"
-      ? window.location.href
-      : "https://tellnab.com";
-
-  const params = new URLSearchParams({
+  const href = buildSupportRequestUrl({
     type: "ISSUE",
-    pageUrl,
     subject: "Issue report",
-    v: supportVersion,
   });
-
-  const href = `${supportBase.replace(/\/$/, "")}/?${params.toString()}`;
 
   return (
     <a

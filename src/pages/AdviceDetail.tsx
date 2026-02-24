@@ -20,6 +20,7 @@ import {
 } from "../services/api";
 import { AdviceComment, AdviceItem, AdviceStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
+import { buildSupportRequestUrl } from "../utils/support";
 import { useSeo } from "../utils/seo";
 
 export default function AdviceDetail() {
@@ -59,6 +60,13 @@ export default function AdviceDetail() {
   const boostDurationDays = Number(
     import.meta.env.VITE_BOOST_DURATION_DAYS || 3,
   );
+  const reportThreadUrl = id
+    ? buildSupportRequestUrl({
+        type: "ABUSE",
+        subject: "Report thread",
+        adviceId: id,
+      })
+    : null;
 
   function parseApiError(err: unknown, fallback: string) {
     if (typeof err === "object" && err && "response" in err) {
@@ -490,6 +498,16 @@ export default function AdviceDetail() {
             >
               Open share card
             </a>
+            {reportThreadUrl ? (
+              <a
+                href={reportThreadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-rose-300/25 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-100"
+              >
+                Report thread
+              </a>
+            ) : null}
           </div>
         ) : null}
         {advice.isLocked ? (

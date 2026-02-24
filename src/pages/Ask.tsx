@@ -190,10 +190,13 @@ export default function Ask() {
   }
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-3">
+    <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
       <section className="lg:col-span-2">
-        <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/80 to-slate-900/60 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
-          <h2 className="mb-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+        <div className="premium-glass rounded-3xl bg-gradient-to-b from-slate-900/82 to-slate-900/62 p-6 shadow-2xl shadow-slate-950/45 sm:p-8">
+          <div className="inline-flex items-center rounded-full border border-violet-300/30 bg-violet-500/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-100">
+            Anonymous • Honest • Safe
+          </div>
+          <h2 className="mb-2 mt-4 text-2xl font-semibold tracking-[-0.01em] text-white sm:text-3xl">
             Instant Ask Flow
           </h2>
           <p className="mb-4 text-sm text-violet-100">
@@ -203,7 +206,7 @@ export default function Ask() {
 
           <IdentityModeSelector value={"ANONYMOUS"} onChange={() => null} />
 
-          <p className="mb-6 text-sm leading-6 text-slate-300">
+          <p className="mb-6 text-sm leading-7 text-slate-300">
             No signup required to post. Share context clearly to get better,
             faster responses.
           </p>
@@ -255,7 +258,7 @@ export default function Ask() {
                         key={category.id}
                         type="button"
                         onClick={() => setCategoryId(category.id)}
-                        className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                        className={`ui-interactive rounded-full border px-3 py-1.5 text-xs transition ${
                           active
                             ? "border-violet-300/70 bg-violet-500/20 text-violet-100"
                             : "border-white/15 bg-slate-900/65 text-slate-300 hover:border-white/30"
@@ -300,7 +303,7 @@ export default function Ask() {
                           language.key as "ENGLISH" | "URDU" | "ROMAN_URDU",
                         )
                       }
-                      className={`rounded-xl border px-3 py-1.5 text-xs transition ${
+                      className={`ui-interactive rounded-xl border px-3 py-1.5 text-xs transition ${
                         active
                           ? "border-violet-300/70 bg-violet-500/20 text-violet-100"
                           : "border-white/15 bg-slate-900/65 text-slate-300 hover:border-white/30"
@@ -398,7 +401,7 @@ export default function Ask() {
                     key={tone}
                     type="button"
                     onClick={() => setTargetTone(tone)}
-                    className={`rounded-xl border px-2.5 py-1 text-xs transition ${
+                    className={`ui-interactive rounded-xl border px-2.5 py-1 text-xs transition ${
                       targetTone === tone
                         ? "border-violet-300/70 bg-violet-400/25 text-violet-100"
                         : "border-white/15 bg-slate-900/60 text-slate-300 hover:border-white/25"
@@ -457,7 +460,7 @@ export default function Ask() {
                   <Button to="/register">Continue with Signup</Button>
                   <Link
                     to="/advice"
-                    className="inline-flex items-center rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                    className="ui-interactive inline-flex items-center rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
                   >
                     View advice feed
                   </Link>
@@ -469,7 +472,7 @@ export default function Ask() {
       </section>
 
       <aside className="space-y-4">
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/75 to-slate-900/55 p-5">
+        <div className="premium-glass rounded-2xl p-5">
           <h3 className="font-semibold text-white">Get better answers</h3>
           <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-300">
             <li>Share concrete context</li>
@@ -478,7 +481,7 @@ export default function Ask() {
           </ul>
         </div>
 
-        <div className="rounded-2xl border border-violet-300/25 bg-gradient-to-br from-violet-500/15 to-cyan-500/10 p-5">
+        <div className="premium-glass rounded-2xl bg-gradient-to-br from-violet-500/14 to-cyan-500/10 p-5">
           <h3 className="font-semibold text-white">Reminder</h3>
           <p className="mt-2 text-sm text-violet-100/90">
             Unfiltered does not mean abusive. Keep it respectful.

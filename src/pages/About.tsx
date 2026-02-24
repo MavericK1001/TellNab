@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionTitle";
 import { useSeo } from "../utils/seo";
@@ -50,6 +51,21 @@ export default function About() {
           </p>
         </Card>
       </div>
+
+      <Card>
+        <h3 className="text-lg font-semibold text-white">Safety in practice</h3>
+        <p className="mt-2 text-sm text-slate-300">
+          We enforce abuse and spam controls through user reports and moderator
+          actions. Review our clear enforcement and urgent-safety policy in
+          community terms.
+        </p>
+        <Link
+          to="/terms"
+          className="mt-3 inline-flex rounded-lg border border-violet-300/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
+        >
+          Read safety terms
+        </Link>
+      </Card>
     </div>
   );
 }
