@@ -114,7 +114,31 @@ Position TellNab as premium, trusted, and category-leading.
 
 ---
 
-## 4) Support Email Reliability
+## 4) Groups Purpose Activation (Topic Communities)
+
+Status: **In Progress**
+Priority: **High**
+
+### Goal
+
+Transform groups into clear topic communities with discoverable public communities and moderated request-to-join communities.
+
+### Current progress
+
+- Topic category binding started for groups.
+- Discovery filters started (search + topic + visibility).
+- Private group terminology shifted to request-to-join in UI.
+- Group-linked advice read visibility hardening started.
+
+### Remaining plan
+
+- Complete API + DB rollout for topic-category relation.
+- Add group posting surface in Ask/Feed flow.
+- Add recurring engagement loops (check-ins, activity signals).
+
+---
+
+## 5) Support Email Reliability
 
 Status: **In Progress**
 Priority: **High**
@@ -137,7 +161,7 @@ Reliable user notification when support replies.
 
 ---
 
-## 5) Working Agreement
+## 6) Working Agreement
 
 Status: **Active**
 

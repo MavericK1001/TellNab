@@ -353,9 +353,15 @@ export type GroupSummary = {
   name: string;
   description?: string | null;
   visibility: GroupVisibility | string;
+  joinPolicyLabel?: "OPEN" | "REQUEST_TO_JOIN" | string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  topicCategory?: {
+    id: string;
+    slug: string;
+    name: string;
+  } | null;
   owner?: {
     id: string;
     name: string;

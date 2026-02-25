@@ -663,8 +663,20 @@ export async function listCategories(): Promise<CategoryItem[]> {
   return response.data.categories;
 }
 
-export async function listGroups(): Promise<GroupSummary[]> {
-  const response = await api.get<{ groups: GroupSummary[] }>("/groups");
+export async function listGroups(options?: {
+  q?: string;
+  visibility?: "PUBLIC" | "PRIVATE" | "ALL";
+  topicCategoryId?: string;
+}): Promise<GroupSummary[]> {
+  const response = await api.get<{ groups: GroupSummary[] }>("/groups", {
+    params: {
+      ...(options?.q ? { q: options.q } : {}),
+      ...(options?.visibility ? { visibility: options.visibility } : {}),
+      ...(options?.topicCategoryId
+        ? { topicCategoryId: options.topicCategoryId }
+        : {}),
+    },
+  });
   return response.data.groups;
 }
 
@@ -672,6 +684,7 @@ export async function createGroup(payload: {
   name: string;
   description?: string;
   visibility: "PUBLIC" | "PRIVATE";
+  topicCategoryId?: string;
 }): Promise<GroupSummary> {
   const response = await api.post<{ group: GroupSummary }>("/groups", payload);
   return response.data.group;

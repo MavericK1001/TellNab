@@ -390,6 +390,7 @@ model Category {
   updatedAt   DateTime @updatedAt
 
   advices Advice[]
+  topicGroups DiscussionGroup[] @relation("GroupTopicCategory")
 }
 
 model Advice {
@@ -454,14 +455,18 @@ model DiscussionGroup {
   visibility  String   @default("PUBLIC")
   isActive    Boolean  @default(true)
   ownerId     String
+  topicCategoryId String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   owner             User                   @relation("DiscussionGroupOwner", fields: [ownerId], references: [id])
+  topicCategory     Category?              @relation("GroupTopicCategory", fields: [topicCategoryId], references: [id])
   memberships       GroupMembership[]
   joinRequests      GroupJoinRequest[]
   moderationActions GroupModerationAction[]
   advices           Advice[]
+
+  @@index([topicCategoryId, createdAt])
 }
 
 model GroupMembership {

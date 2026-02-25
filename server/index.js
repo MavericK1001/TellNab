@@ -605,6 +605,17 @@ function sanitizeDiscussionGroup(group, options = {}) {
           isActive: group.owner.isActive,
         }
       : null,
+    topicCategory: group.topicCategory
+      ? {
+          id: group.topicCategory.id,
+          slug: group.topicCategory.slug,
+          name: group.topicCategory.name,
+        }
+      : null,
+    joinPolicyLabel:
+      group.visibility === GROUP_VISIBILITY.PRIVATE
+        ? "REQUEST_TO_JOIN"
+        : "OPEN",
     membership: options.membership || null,
     memberCount,
   };
@@ -1813,6 +1824,29 @@ function canFallbackModerateGroupJoin(group, user) {
   return !group.owner.isActive;
 }
 
+function buildAdviceGroupVisibilityWhere(viewer) {
+  if (!viewer) {
+    return {
+      OR: [{ groupId: null }, { group: { visibility: GROUP_VISIBILITY.PUBLIC } }],
+    };
+  }
+
+  if (viewer.role === ROLES.ADMIN || viewer.role === ROLES.MODERATOR) {
+    return {
+      OR: [{ groupId: null }, { group: { isActive: true } }],
+    };
+  }
+
+  return {
+    OR: [
+      { groupId: null },
+      { group: { visibility: GROUP_VISIBILITY.PUBLIC } },
+      { group: { ownerId: viewer.id } },
+      { group: { memberships: { some: { userId: viewer.id } } } },
+    ],
+  };
+}
+
 function slugify(value) {
   return String(value || "")
     .toLowerCase()
@@ -2277,6 +2311,13 @@ const createDiscussionGroupSchema = z.object({
   name: z.string().min(3).max(80),
   description: z.string().max(500).optional(),
   visibility: z.enum([GROUP_VISIBILITY.PUBLIC, GROUP_VISIBILITY.PRIVATE]).default(GROUP_VISIBILITY.PUBLIC),
+  topicCategoryId: z.string().min(1).optional(),
+});
+
+const listDiscussionGroupsQuerySchema = z.object({
+  q: z.string().max(80).optional(),
+  visibility: z.enum([GROUP_VISIBILITY.PUBLIC, GROUP_VISIBILITY.PRIVATE, "ALL"]).default("ALL"),
+  topicCategoryId: z.string().min(1).optional(),
 });
 
 const createGroupJoinRequestSchema = z.object({
@@ -5069,6 +5110,9 @@ app.get("/api/admin/groups", authRequired, moderatorOrAdminRequired, async (req,
         owner: {
           select: { id: true, name: true, isActive: true },
         },
+        topicCategory: {
+          select: { id: true, slug: true, name: true },
+        },
         _count: {
           select: {
             memberships: true,
@@ -5590,6 +5634,8 @@ app.post("/api/advice", async (req, res) => {
 app.get("/api/advice", async (req, res) => {
   await clearExpiredBoosts();
 
+  const viewer = await getOptionalAuthUser(req);
+
   const status = String(req.query.status || ADVICE_STATUS.APPROVED);
   const categoryId = typeof req.query.categoryId === "string" ? req.query.categoryId : undefined;
   const groupId = typeof req.query.groupId === "string" ? req.query.groupId : undefined;
@@ -5598,12 +5644,14 @@ app.get("/api/advice", async (req, res) => {
   let where = {
     status: ADVICE_STATUS.APPROVED,
     ...(FEATURE_PUBLIC_FEED_V2 ? { visibility: ADVICE_VISIBILITY.PUBLIC } : {}),
+    ...buildAdviceGroupVisibilityWhere(viewer),
     ...(categoryId ? { categoryId } : {}),
     ...(groupId ? { groupId } : {}),
   };
   if (allowAll && Object.values(ADVICE_STATUS).includes(status)) {
     where = {
       status,
+      ...buildAdviceGroupVisibilityWhere(viewer),
       ...(categoryId ? { categoryId } : {}),
       ...(groupId ? { groupId } : {}),
     };
@@ -5674,6 +5722,7 @@ app.get("/api/public/feed", async (req, res) => {
   }
 
   await clearExpiredBoosts();
+  const viewer = await getOptionalAuthUser(req);
 
   const parsed = publicFeedQuerySchema.safeParse(req.query || {});
   if (!parsed.success) {
@@ -5689,6 +5738,7 @@ app.get("/api/public/feed", async (req, res) => {
   const where = {
     status: ADVICE_STATUS.APPROVED,
     visibility: ADVICE_VISIBILITY.PUBLIC,
+    ...buildAdviceGroupVisibilityWhere(viewer),
     ...(categoryId ? { categoryId } : {}),
     ...(q
       ? {
@@ -7310,17 +7360,27 @@ app.delete(
 app.get("/api/groups", async (req, res) => {
   try {
     const viewer = await getOptionalAuthUser(req);
+    const parsed = listDiscussionGroupsQuerySchema.safeParse(req.query || {});
+
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid query", issues: parsed.error.issues });
+    }
+
+    const query = parsed.data;
+    const q = String(query.q || "").trim();
 
     const where = {
       isActive: true,
-      ...(viewer
+      ...(query.visibility !== "ALL" ? { visibility: query.visibility } : {}),
+      ...(query.topicCategoryId ? { topicCategoryId: query.topicCategoryId } : {}),
+      ...(q
         ? {
             OR: [
-              { visibility: GROUP_VISIBILITY.PUBLIC },
-              { memberships: { some: { userId: viewer.id } } },
+              { name: { contains: q } },
+              { description: { contains: q } },
             ],
           }
-        : { visibility: GROUP_VISIBILITY.PUBLIC }),
+        : {}),
     };
 
     const groups = await prisma.discussionGroup.findMany({
@@ -7329,6 +7389,9 @@ app.get("/api/groups", async (req, res) => {
       include: {
         owner: {
           select: { id: true, name: true, isActive: true },
+        },
+        topicCategory: {
+          select: { id: true, slug: true, name: true },
         },
         memberships: viewer
           ? {
@@ -7373,6 +7436,13 @@ app.post("/api/groups", authRequired, async (req, res) => {
       uniqueSlug = `${baseSlug}-${Math.floor(Math.random() * 900 + 100)}`;
     }
 
+    if (data.topicCategoryId) {
+      const category = await prisma.category.findUnique({ where: { id: data.topicCategoryId } });
+      if (!category || !category.isActive) {
+        return res.status(400).json({ message: "Invalid topic category" });
+      }
+    }
+
     const created = await prisma.$transaction(async (tx) => {
       const group = await tx.discussionGroup.create({
         data: {
@@ -7382,10 +7452,14 @@ app.post("/api/groups", authRequired, async (req, res) => {
           ownerId: req.user.id,
           slug: uniqueSlug,
           isActive: true,
+          topicCategoryId: data.topicCategoryId || null,
         },
         include: {
           owner: {
             select: { id: true, name: true, isActive: true },
+          },
+          topicCategory: {
+            select: { id: true, slug: true, name: true },
           },
         },
       });
@@ -7418,6 +7492,9 @@ app.get("/api/groups/:id", async (req, res) => {
       include: {
         owner: {
           select: { id: true, name: true, isActive: true },
+        },
+        topicCategory: {
+          select: { id: true, slug: true, name: true },
         },
         memberships: {
           include: {

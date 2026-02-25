@@ -8,11 +8,12 @@ import {
   getGroupDetail,
   joinGroup,
   leaveGroup,
+  listCategories,
   listGroupJoinRequests,
   listGroups,
   rejectGroupJoinRequest,
 } from "../services/api";
-import { GroupJoinRequest, GroupSummary } from "../types";
+import { CategoryItem, GroupJoinRequest, GroupSummary } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { useSeo } from "../utils/seo";
 
@@ -25,6 +26,13 @@ export default function Groups() {
   const [isError, setIsError] = useState(false);
   const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
   const [requestLoading, setRequestLoading] = useState(false);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [query, setQuery] = useState("");
+  const [visibilityFilter, setVisibilityFilter] = useState<
+    "ALL" | "PUBLIC" | "PRIVATE"
+  >("ALL");
+  const [topicCategoryIdFilter, setTopicCategoryIdFilter] =
+    useState<string>("");
 
   useSeo({
     title: "Discussion Groups | TellNab",
@@ -45,10 +53,19 @@ export default function Groups() {
   async function loadGroups() {
     try {
       setLoading(true);
-      const list = await listGroups();
+      const list = await listGroups({
+        q: query.trim() || undefined,
+        visibility: visibilityFilter,
+        topicCategoryId: topicCategoryIdFilter || undefined,
+      });
       setGroups(list);
       if (!selectedGroupId && list.length > 0) {
         setSelectedGroupId(list[0].id);
+      } else if (
+        selectedGroupId &&
+        !list.some((item) => item.id === selectedGroupId)
+      ) {
+        setSelectedGroupId(list[0]?.id || null);
       }
     } catch {
       setIsError(true);
@@ -61,7 +78,21 @@ export default function Groups() {
   useEffect(() => {
     loadGroups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, visibilityFilter, topicCategoryIdFilter]);
+
+  useEffect(() => {
+    listCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadGroups();
+    }, 250);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
   useEffect(() => {
     if (!selectedGroupId || !canReviewRequests) {
@@ -89,6 +120,8 @@ export default function Groups() {
         visibility: String(formData.get("visibility") || "PUBLIC") as
           | "PUBLIC"
           | "PRIVATE",
+        topicCategoryId:
+          String(formData.get("topicCategoryId") || "") || undefined,
       });
       setStatus("Group created.");
       await loadGroups();
@@ -179,10 +212,11 @@ export default function Groups() {
       <section className="space-y-4">
         <Card className="rounded-3xl border-white/15 bg-gradient-to-br from-violet-500/15 via-slate-900/70 to-cyan-500/10">
           <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            Discussion Groups
+            Topic Communities
           </h1>
           <p className="mt-1 text-sm text-slate-300">
-            Start focused public/private communities around specific decisions.
+            Build recurring communities around one topic. Open communities allow
+            instant join, private ones use moderated request-to-join.
           </p>
 
           {user ? (
@@ -201,12 +235,27 @@ export default function Groups() {
                 className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
               />
               <select
+                name="topicCategoryId"
+                required
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Select topic category
+                </option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              <select
                 name="visibility"
                 className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-slate-100"
                 defaultValue="PUBLIC"
               >
-                <option value="PUBLIC">Public</option>
-                <option value="PRIVATE">Private</option>
+                <option value="PUBLIC">Public (open join)</option>
+                <option value="PRIVATE">Private (request to join)</option>
               </select>
               <Button type="submit">Create group</Button>
             </form>
@@ -228,7 +277,42 @@ export default function Groups() {
         </Card>
 
         <Card className="border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-900/60">
-          <h2 className="text-lg font-semibold text-white">Available groups</h2>
+          <h2 className="text-lg font-semibold text-white">
+            Discover communities
+          </h2>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search by topic or name"
+              className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-100 sm:col-span-2"
+            />
+            <select
+              value={visibilityFilter}
+              onChange={(event) =>
+                setVisibilityFilter(
+                  event.target.value as "ALL" | "PUBLIC" | "PRIVATE",
+                )
+              }
+              className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-100"
+            >
+              <option value="ALL">All access types</option>
+              <option value="PUBLIC">Public only</option>
+              <option value="PRIVATE">Request to join</option>
+            </select>
+          </div>
+          <select
+            value={topicCategoryIdFilter}
+            onChange={(event) => setTopicCategoryIdFilter(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-100"
+          >
+            <option value="">All topic categories</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
           {loading ? (
             <p className="mt-3 text-sm text-slate-300">Loading…</p>
           ) : null}
@@ -247,12 +331,19 @@ export default function Groups() {
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-white">{group.name}</p>
                   <span className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-slate-300">
-                    {group.visibility}
+                    {group.visibility === "PRIVATE"
+                      ? "Request to join"
+                      : "Open join"}
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-slate-300">
                   {group.description}
                 </p>
+                {group.topicCategory ? (
+                  <p className="mt-1 text-[11px] text-cyan-200">
+                    Topic: {group.topicCategory.name}
+                  </p>
+                ) : null}
                 <p className="mt-2 text-[11px] text-slate-400">
                   {group.memberCount} members
                 </p>
@@ -275,6 +366,11 @@ export default function Groups() {
               <p className="text-sm text-slate-300">
                 {selectedGroup.description}
               </p>
+              {selectedGroup.topicCategory ? (
+                <p className="text-xs text-cyan-200">
+                  Topic: {selectedGroup.topicCategory.name}
+                </p>
+              ) : null}
               <p className="text-xs text-slate-400">
                 Owner: {selectedGroup.owner?.name || "Unknown"}
               </p>
@@ -292,7 +388,9 @@ export default function Groups() {
                     type="button"
                     onClick={() => void onJoin(selectedGroup.id)}
                   >
-                    Join group
+                    {selectedGroup.visibility === "PRIVATE"
+                      ? "Request to join"
+                      : "Join group"}
                   </Button>
                 )}
               </div>
